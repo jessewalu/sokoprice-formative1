@@ -9,6 +9,7 @@
 # DevOps: CI/CD, container and infrastructure files
 /.github/               @jessewalu @Karabo-jpg
 /Dockerfile             @jessewalu @Karabo-jpg
+/docker-compose.yml     @jessewalu @Karabo-jpg
 
 # Documentation and project planning
 /README.md              @Karabo-jpg @Kkadi20
