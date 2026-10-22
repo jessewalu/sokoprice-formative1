@@ -85,6 +85,12 @@ docker build -t sokoprice .
 docker run -p 5000:5000 sokoprice
 ```
 
+Or using **Docker Compose**:
+
+```bash
+docker compose up --build
+```
+
 ### Try it out
 
 **REST API**
@@ -161,6 +167,7 @@ sokoprice-formative1/
 │   ├── workflows/ci.yml     # CI: run tests, then build Docker image
 │   └── CODEOWNERS           # Required reviewers
 ├── Dockerfile               # Non-root, gunicorn
+├── docker-compose.yml       # Local container orchestration & healthcheck
 ├── requirements.txt
 ├── pytest.ini
 ├── .env.example             # Template for secrets (real .env is git-ignored)
