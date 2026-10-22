@@ -1,0 +1,15 @@
+# Every change needs review from a code owner (teammates review each other's PRs).
+# Default owners for the whole repository
+*                       @jessewalu @Karabo-jpg @Kkadi20
+
+# Application code and tests
+/app/                   @jessewalu @Karabo-jpg
+/tests/                 @Karabo-jpg @Kkadi20
+
+# DevOps: CI/CD, container and infrastructure files
+/.github/               @jessewalu @Karabo-jpg
+/Dockerfile             @jessewalu @Karabo-jpg
+
+# Documentation and project planning
+/README.md              @Karabo-jpg @Kkadi20
+/docs/                  @Karabo-jpg @Kkadi20
