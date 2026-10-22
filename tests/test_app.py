@@ -17,7 +17,6 @@ def data():
     return p.load_data()
 
 
-# ---- business logic ----
 def test_best_market_to_sell(data):
     assert p.best_market_to_sell(data, "maize") == ("Kimironko", 450)
 
@@ -35,20 +34,21 @@ def test_crop_lookup_is_case_insensitive(data):
     assert p.get_prices(data, " Maize ") == p.get_prices(data, "maize")
 
 
-# ---- USSD ----
 def test_ussd_main_menu(data):
     assert handle_ussd(data, "").startswith("CON Welcome to SokoPrice")
 
 
 def test_ussd_second_level_lists_crops(data):
-    out = handle_ussd(data, "1")
-    assert out.startswith("CON") and "Maize" in out and "Beans" in out
+    response = handle_ussd(data, "1")
+    assert response.startswith("CON")
+    assert "Maize" in response
+    assert "Beans" in response
 
 
 def test_ussd_price_lookup(data):
-    # crops sorted: beans, cassava, maize, potatoes, tomatoes -> 3 = maize
-    out = handle_ussd(data, "1*3")
-    assert out.startswith("END Maize") and "Kimironko: 450" in out
+    response = handle_ussd(data, "1*3")
+    assert response.startswith("END Maize")
+    assert "Kimironko: 450" in response
 
 
 def test_ussd_best_market(data):
@@ -61,21 +61,67 @@ def test_ussd_exit_and_invalid(data):
     assert handle_ussd(data, "1*99").startswith("END Invalid")
 
 
-# ---- HTTP API ----
-def test_health(client):
+def test_health_and_index_endpoints(client):
     assert client.get("/health").json == {"status": "ok"}
+    assert client.get("/").json["name"] == "SokoPrice"
+
+
+def test_crop_and_price_endpoints(client):
+    crops = client.get("/api/crops").json
+    assert "maize" in crops["crops"]
+    assert "Kimironko" in crops["markets"]
+
+    response = client.get("/api/prices/MAIZE")
+    assert response.status_code == 200
+    assert response.json == {
+        "crop": "maize",
+        "currency": "RWF",
+        "unit": "kg",
+        "updated": "2026-10-20",
+        "prices": {
+            "Kimironko": 450,
+            "Nyabugogo": 420,
+            "Musanze": 400,
+        },
+    }
 
 
 def test_api_prices(client):
-    r = client.get("/api/prices/beans")
-    assert r.status_code == 200
-    assert r.json["prices"]["Musanze"] == 850
+    response = client.get("/api/prices/beans")
+    assert response.status_code == 200
+    assert response.json["prices"]["Musanze"] == 850
 
 
-def test_api_unknown_crop_404(client):
-    assert client.get("/api/prices/gold").status_code == 404
+def test_unknown_crop_returns_not_found(client):
+    response = client.get("/api/prices/unknown")
+    assert response.status_code == 404
+    assert response.json == {"error": "Unknown crop 'unknown'"}
 
 
-def test_ussd_endpoint(client):
-    r = client.post("/ussd", data={"text": "", "sessionId": "x", "phoneNumber": "+250788000000"})
-    assert r.status_code == 200 and r.text.startswith("CON")
+def test_best_market_endpoint_returns_buy_and_sell_recommendations(client):
+    response = client.get("/api/best-market/maize")
+
+    assert response.status_code == 200
+    assert response.json["best_to_sell"] == {
+        "market": "Kimironko",
+        "price": 450,
+    }
+    assert response.json["cheapest_to_buy"] == {
+        "market": "Musanze",
+        "price": 400,
+    }
+
+
+def test_ussd_endpoint_returns_plain_text(client):
+    response = client.post(
+        "/ussd",
+        data={
+            "text": "",
+            "sessionId": "x",
+            "phoneNumber": "+250788000000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    assert response.get_data(as_text=True).startswith("CON Welcome to SokoPrice")
