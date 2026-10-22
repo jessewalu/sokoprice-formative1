@@ -1,4 +1,4 @@
-# SokoPrice 🌽
+# SokoPrice 
 
 > **Know the market price before you sell.**
 > Crop price tracking for Rwandan smallholder farmers, accessible from any phone via USSD or a simple web API.
