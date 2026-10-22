@@ -1,7 +1,9 @@
-# SokoPrice 
+# SokoPrice 🌽
 
 > **Know the market price before you sell.**
 > Crop price tracking for Rwandan smallholder farmers, accessible from any phone via USSD or a simple web API.
+
+[![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml)
 
 ---
 
@@ -57,8 +59,8 @@ Smallholder farmers in Rwanda and across East Africa often sell their harvest wi
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<your-org>/soko-price.git
-cd soko-price
+git clone https://github.com/jessewalu/sokoprice-formative1.git
+cd sokoprice-formative1
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
@@ -68,7 +70,7 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # 4. (Optional) set up environment variables
-cp .env.example .env
+cp .env.example .env             # Windows: copy .env.example .env
 
 # 5. Start the app
 python run.py
@@ -79,8 +81,8 @@ The app runs at **http://localhost:5000**.
 ### Option B: Run with Docker
 
 ```bash
-docker build -t soko-price .
-docker run -p 5000:5000 soko-price
+docker build -t sokoprice .
+docker run -p 5000:5000 sokoprice
 ```
 
 ### Try it out
@@ -119,6 +121,8 @@ curl -X POST http://localhost:5000/ussd -d "text=1*3"
 curl -X POST http://localhost:5000/ussd -d "text=2*1"
 ```
 
+> On Windows PowerShell use `curl.exe` instead of `curl`.
+
 **USSD menu flow**
 ```
 Welcome to SokoPrice
@@ -138,43 +142,72 @@ pytest -q
 
 ## 6. Project Structure
 
+The code separates concerns so each part can later become its own service
+(pricing data, USSD gateway, API).
+
 ```
-soko-price/
+sokoprice-formative1/
 ├── app/
-│   ├── __init__.py      # Flask app factory + REST endpoints
-│   ├── prices.py        # Price logic (best/cheapest market)
-│   └── ussd.py          # USSD menu state machine
-├── data/prices.json     # Sample price dataset
-├── tests/test_app.py    # Unit + API tests
-├── docs/PROJECT_BOARD.md# GitHub Projects backlog & setup guide
-├── .github/workflows/ci.yml
-├── Dockerfile
+│   ├── __init__.py          # Flask app factory + REST endpoints
+│   ├── prices.py            # Price logic (best/cheapest market), no web code
+│   └── ussd.py              # USSD menu state machine, no web code
+├── data/prices.json         # Sample price dataset
+├── tests/
+│   ├── test_app.py          # REST API + USSD endpoint tests
+│   ├── test_prices.py       # Price logic unit tests
+│   └── test_ussd.py         # USSD menu unit tests
+├── docs/PROJECT_BOARD.md    # GitHub Projects backlog, user stories, setup guide
+├── .github/
+│   ├── workflows/ci.yml     # CI: run tests, then build Docker image
+│   └── CODEOWNERS           # Required reviewers
+├── Dockerfile               # Non-root, gunicorn
 ├── requirements.txt
-├── .env.example         # Template for secrets (real .env is git-ignored)
+├── pytest.ini
+├── .env.example             # Template for secrets (real .env is git-ignored)
 ├── .gitignore
-└── run.py
+├── LICENSE                  # MIT
+└── run.py                   # Entry point
 ```
 
-## 7. Security Practices
+## 7. Security Practices ("shift left")
 
 - Comprehensive `.gitignore` excluding secrets (`.env`, keys, credentials), IDE files (`.idea/`, `.vscode/`), dependencies (`venv/`, `node_modules/`) and build artifacts/logs.
 - Configuration is read from **environment variables**; only `.env.example` (placeholders) is committed.
 - Docker image runs as a **non-root user**.
 - Debug mode is **off by default**.
+- `main` is protected by branch protection rules (see below).
+
+### Branch Protection on `main`
+
+| Rule | Why it matters |
+|------|----------------|
+| Require a pull request before merging | No one pushes directly to `main`; every change is visible and discussed |
+| Require 1 approval | A second pair of eyes catches bugs and spreads knowledge |
+| Dismiss stale approvals on new commits | An approval only counts for the code that was actually reviewed |
+| Require status checks (`test`, `docker-build`) | Broken code or a broken image cannot be merged |
+| Require branches to be up to date | Changes are tested against the latest `main`, avoiding merge surprises |
+| Require conversation resolution | Review comments cannot be ignored |
+| Include administrators | The rules apply to everyone, with no exceptions |
 
 ## 8. Project Management
 
-Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Done) with user stories, labels and milestones. See [`docs/PROJECT_BOARD.md`](docs/PROJECT_BOARD.md).
+Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Done) with user stories, acceptance criteria, labels, assignees and milestones. The full backlog is documented in [`docs/PROJECT_BOARD.md`](docs/PROJECT_BOARD.md).
 
-## 9. Team
+## 9. Contributing
 
-| Name | Role |
-|------|------|
-| _Member 1_ | _e.g. Backend / Project lead_ |
-| _Member 2_ | _e.g. DevOps / CI-CD_ |
-| _Member 3_ | _e.g. Testing / Documentation_ |
-| _Member 4_ | _e.g. Data / USSD_ |
+1. Create a branch from `main` (`feature/<name>` or `fix/<name>`).
+2. Commit with clear messages (`feat:`, `fix:`, `docs:`, `build:`, `test:`).
+3. Open a pull request linked to its issue (e.g. `Closes #5`).
+4. Get one teammate's approval and a green CI before merging.
 
-## 10. License
+## 10. Team
 
-For educational use as part of a university course project.
+| Name | GitHub | Role |
+|------|--------|------|
+| Jesse Walusansa | [@jessewalu](https://github.com/jessewalu) | Backend & DevOps (CI/CD) |
+| Karabo Ojiambo | [@Karabo-jpg](https://github.com/Karabo-jpg) | Testing, Docker & Documentation |
+| K. Koita | [@Kkadi20](https://github.com/Kkadi20) | Repository security & Project management |
+
+## 11. License
+
+Released under the [MIT License](LICENSE).
