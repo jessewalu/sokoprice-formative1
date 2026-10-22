@@ -1,0 +1,13 @@
+{
+  "currency": "RWF",
+  "unit": "kg",
+  "updated": "2026-10-20",
+  "markets": ["Kimironko", "Nyabugogo", "Musanze"],
+  "crops": {
+    "maize":    {"Kimironko": 450, "Nyabugogo": 420, "Musanze": 400},
+    "beans":    {"Kimironko": 900, "Nyabugogo": 870, "Musanze": 850},
+    "potatoes": {"Kimironko": 380, "Nyabugogo": 350, "Musanze": 300},
+    "tomatoes": {"Kimironko": 700, "Nyabugogo": 650, "Musanze": 600},
+    "cassava":  {"Kimironko": 320, "Nyabugogo": 300, "Musanze": 310}
+  }
+}
