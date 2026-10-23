@@ -215,6 +215,9 @@ Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Don
 | Karabo Ojiambo | [@Karabo-jpg](https://github.com/Karabo-jpg) | Testing, Docker & Documentation |
 | K. Koita | [@Kkadi20](https://github.com/Kkadi20) | Repository security & Project management |
 
-## 11. License
+## 11. Team collaboration
+https://docs.google.com/spreadsheets/d/1k8UOI845SVSR8oId_86h8xpJYibwzxaeQ3t5jsGJFbw/edit?usp=sharing
+
+## 12. License
 
 Released under the [MIT License](LICENSE).
