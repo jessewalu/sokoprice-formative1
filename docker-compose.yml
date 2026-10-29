@@ -1,15 +1,106 @@
+# =============================================================================
+# SokoPrice - Docker Compose
+#
+# Start everything with ONE command:   docker compose up --build
+# Stop (keep data):                    docker compose down
+# Stop and DELETE the database data:   docker compose down -v
+#
+# Services
+#   app : the Flask/gunicorn API + USSD service (built from ./Dockerfile)
+#   db  : PostgreSQL 16, stores the USSD request log (data persisted in a volume)
+#
+# Settings come from environment variables. Copy .env.example to .env to change
+# them; every value below has a safe DEVELOPMENT default so it also works with
+# no .env file. Use real, strong secrets in any shared or production setup.
+# =============================================================================
+name: sokoprice
+
 services:
-  web:
-    build: .
-    ports:
-      - "5000:5000"
-    environment:
-      - PORT=5000
-      - FLASK_DEBUG=0
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sokoprice}
+      POSTGRES_USER: ${POSTGRES_USER:-sokoprice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sokoprice_dev_password}
+    volumes:
+      # Named volume: data survives `docker compose down` and container rebuilds.
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 30s
-      timeout: 10s
+      # Ready only when Postgres accepts connections for our database/user.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # No "ports:" on purpose: the database is reachable only from the app
+    # through the private "backend" network, never from the host or internet.
+
+  # ---------------------------------------------------------------------------
+  # Application
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: sokoprice-app:local
+    restart: unless-stopped
+    # Start the app only after the database reports healthy.
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "5000"
+      FLASK_DEBUG: ${FLASK_DEBUG:-0}
+      # "db" is the service name; Compose DNS resolves it on the backend network.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sokoprice}:${POSTGRES_PASSWORD:-sokoprice_dev_password}@db:5432/${POSTGRES_DB:-sokoprice}
+    ports:
+      # host:container. Change the host port with APP_PORT (e.g. APP_PORT=5001).
+      - "${APP_PORT:-5000}:5000"
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck.py"]
+      interval: 10s
+      timeout: 3s
       retries: 3
       start_period: 5s
+    # Hardening: run a tiny init process, drop all Linux capabilities, block
+    # privilege escalation and make the container filesystem read-only
+    # (gunicorn only needs a writable /tmp, provided as an in-memory tmpfs).
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -----------------------------------------------------------------------------
+# Networks
+#   frontend : app <-> host (published port)
+#   backend  : app <-> db only. "internal: true" blocks all outside access.
+# -----------------------------------------------------------------------------
+networks:
+  frontend:
+  backend:
+    internal: true
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  pgdata:

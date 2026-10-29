@@ -4,14 +4,17 @@ import os
 from flask import Flask, jsonify, request
 
 from . import prices as p
+from .db import RequestLog
 from .ussd import handle_ussd
 
 
-def create_app(data_path=None):
+def create_app(data_path=None, request_log=None):
     app = Flask(__name__)
     # Secrets/config come from environment variables, never hard-coded.
     app.config["DEBUG"] = os.getenv("FLASK_DEBUG", "0") == "1"
     data = p.load_data(data_path) if data_path else p.load_data()
+    # Optional PostgreSQL request log (a no-op when DATABASE_URL is not set).
+    request_log = request_log if request_log is not None else RequestLog.from_env()
 
     @app.get("/")
     def index():
@@ -19,7 +22,7 @@ def create_app(data_path=None):
             name="SokoPrice",
             tagline="Know the market price before you sell.",
             endpoints=["/health", "/api/crops", "/api/prices/<crop>",
-                       "/api/best-market/<crop>", "POST /ussd"],
+                       "/api/best-market/<crop>", "/api/stats", "POST /ussd"],
         )
 
     @app.get("/health")
@@ -50,10 +53,15 @@ def create_app(data_path=None):
             cheapest_to_buy={"market": cheap[0], "price": cheap[1]},
         )
 
+    @app.get("/api/stats")
+    def stats():
+        return jsonify(request_log.stats())
+
     @app.post("/ussd")
     def ussd():
         # Africa's Talking posts form data: sessionId, phoneNumber, text
         text = request.form.get("text", "")
+        request_log.record(text)
         return handle_ussd(data, text), 200, {"Content-Type": "text/plain"}
 
     return app
