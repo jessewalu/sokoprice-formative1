@@ -1,0 +1,9 @@
+# Ruff linter configuration (used locally and by the CI "lint" job).
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "venv"]
+
+[lint]
+# E/W = pycodestyle, F = pyflakes (unused imports/variables, undefined names),
+# I = import sorting, B = bugbear (likely bugs), UP = modern Python syntax.
+select = ["E", "F", "W", "I", "B", "UP"]
