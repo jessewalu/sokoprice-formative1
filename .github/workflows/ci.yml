@@ -64,7 +64,6 @@ jobs:
 
 <<<<<<< HEAD
 =======
-   .
 >>>>>>> origin/main
     services:
       postgres:
