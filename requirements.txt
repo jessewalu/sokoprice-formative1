@@ -1,3 +1,5 @@
+# Runtime dependencies only (these are what gets installed in the Docker image).
+# Development and CI tools live in requirements-dev.txt.
 Flask>=3.0,<4.0
 gunicorn>=22.0
-pytest>=8.0
+psycopg[binary]>=3.1,<4.0
