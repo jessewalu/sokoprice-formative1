@@ -1,25 +1,182 @@
+# =============================================================================
+# CI pipeline - runs on every push to a non-main branch and on every pull
+# request that targets main.
+# =============================================================================
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches-ignore:
+      - main
   pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ---------------------------------------------------------------------------
+  # 1. Lint - fails the pipeline on any style error or likely bug
+  # ---------------------------------------------------------------------------
+  lint:
+    name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: pytest -q
+          cache-dependency-path: requirements-dev.txt
 
-  docker-build:
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint with Ruff (fails on errors)
+        run: ruff check . --output-format=github
+
+  # ---------------------------------------------------------------------------
+  # 2. Test - unit tests plus a real PostgreSQL integration test, on two
+  #    Python versions (matrix strategy)
+  # ---------------------------------------------------------------------------
+  test:
+    name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: test
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sokoprice_test
+          POSTGRES_USER: sokoprice
+          POSTGRES_PASSWORD: ci_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sokoprice -d sokoprice_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://sokoprice:ci_only_password@localhost:5432/sokoprice_test
+
     steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t soko-price:ci .
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage (fails on any failing test or <80% coverage)
+        run: >-
+          pytest
+          --cov=app
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=80
+          --junitxml=test-results.xml
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-py${{ matrix.python-version }}
+          path: |
+            test-results.xml
+            coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # 3. Docker - build the image, then prove it (and Compose) really run
+  #    Only starts when lint and tests have passed.
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: docker-build
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (with GitHub Actions layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          tags: sokoprice-app:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image (container must become healthy and answer requests)
+        run: |
+          docker run -d --name sokoprice-ci -p 5000:5000 sokoprice-app:local
+          status="starting"
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' sokoprice-ci)
+            echo "container health: ${status}"
+            if [ "${status}" = "healthy" ]; then break; fi
+            sleep 3
+          done
+          if [ "${status}" != "healthy" ]; then
+            docker logs sokoprice-ci
+            exit 1
+          fi
+          curl --fail --silent --show-error http://localhost:5000/health
+          echo
+          curl --fail --silent --show-error http://localhost:5000/api/prices/maize
+          echo
+          curl --fail --silent --show-error -X POST http://localhost:5000/ussd -d "text=1*3"
+          echo
+          docker rm -f sokoprice-ci
+
+      - name: Validate and run the full Docker Compose stack (app + PostgreSQL)
+        run: |
+          docker compose config --quiet
+          docker compose up -d --no-build --wait --wait-timeout 120
+          curl --fail --silent --show-error http://localhost:5000/health
+          echo
+          curl --fail --silent --show-error -X POST http://localhost:5000/ussd -d "text=1*3"
+          echo
+          curl --fail --silent --show-error http://localhost:5000/api/stats | tee stats.json
+          echo
+          python3 -c "import json; d = json.load(open('stats.json')); assert d['database'] == 'connected' and d['ussd_requests'] >= 1, d"
+
+      - name: Show Compose logs if anything failed
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Clean up containers
+        if: always()
+        run: |
+          docker rm -f sokoprice-ci || true
+          docker compose down --volumes --remove-orphans
