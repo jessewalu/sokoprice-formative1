@@ -317,12 +317,12 @@ Links to real runs and pull requests (fill in the URLs from the Actions and Pull
 
 | Evidence | Requirement | Link |
 |----------|-------------|------|
-| Successful run #1 | ≥ 3 successful runs | _add link_ |
-| Successful run #2 | | _add link_ |
-| Successful run #3 | | _add link_ |
-| Failed run (lint or test) | ≥ 1 failed run | _add link_ |
-| Fix that turned it green | failed run then fixed | _add link_ |
-| Pull request with CI checks and review | ≥ 1 PR with review | _add link_ |
+| Successful run #1 | ≥ 3 successful runs | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41121356911 |
+| Successful run #2 | | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41044648209 |
+| Successful run #3 | | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41121607373 |
+| Failed run (lint or test) | ≥ 1 failed run | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41034821146 |
+| Fix that turned it green | failed run then fixed | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41121356911 |
+| Pull request with CI checks and review | ≥ 1 PR with review | https://github.com/jessewalu/sokoprice-formative1/pull/16 |
 | Branch protection screenshot | Required checks enabled | `docs/screenshots/branch-protection.png` |
 
 ### Team collaboration
