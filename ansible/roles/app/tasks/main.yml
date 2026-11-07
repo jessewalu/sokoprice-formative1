@@ -1,0 +1,86 @@
+---
+- name: Refuse to deploy without a database password
+  ansible.builtin.assert:
+    that:
+      - app_postgres_password | length >= 12
+      - app_postgres_password is match('^[A-Za-z0-9._~-]+$')
+    fail_msg: >-
+      Set vault_postgres_password (at least 12 characters: letters, digits . _ ~ - only) in
+      group_vars/all/vault.yml. See group_vars/all/vault.yml.example.
+    quiet: true
+
+- name: Create the application directory
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0750"
+
+- name: Write the secrets file (readable by the owner only)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Write the Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ app_dir }}/docker-compose.yml"
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0640"
+
+- name: Deploy the containers
+  block:
+    - name: Log in to the image registry (only when credentials are provided)
+      ansible.builtin.command:
+        cmd: "docker login {{ app_registry }} -u {{ app_registry_username }} --password-stdin"
+        stdin: "{{ app_registry_token }}"
+      when:
+        - app_registry_username | length > 0
+        - app_registry_token | length > 0
+      changed_when: false
+      no_log: true
+
+    - name: Pull the images and start the stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        pull: always
+        state: present
+        wait: true
+        wait_timeout: 120
+      register: app_stack
+
+    - name: Wait until the API answers on the server
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_public_port }}/health"
+        status_code: 200
+        timeout: 5
+      register: app_health
+      until: app_health.status == 200
+      retries: "{{ app_health_retries }}"
+      delay: "{{ app_health_delay }}"
+      changed_when: false
+  rescue:
+    - name: Collect recent container logs for the error report
+      ansible.builtin.command:
+        cmd: docker compose logs --no-color --tail 40
+        chdir: "{{ app_dir }}"
+      register: app_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Show the logs and stop
+      ansible.builtin.fail:
+        msg: "Deployment failed. Last log lines: {{ app_failure_logs.stdout | default('none') }}"
+  always:
+    - name: Remove registry credentials from the server
+      ansible.builtin.command:
+        cmd: "docker logout {{ app_registry }}"
+      when: app_registry_username | length > 0
+      changed_when: false
+      failed_when: false

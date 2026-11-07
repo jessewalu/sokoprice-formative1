@@ -1,0 +1,22 @@
+---
+# Dynamic inventory: finds the server in AWS by its tags, so no IP address has to
+# be copied around. Use it with:
+#   export AWS_DEFAULT_REGION=<your region>   # credentials come from your AWS profile
+#   ansible-inventory -i inventory/aws_ec2.yml --graph
+#   ansible-playbook -i inventory/aws_ec2.yml site.yml --private-key ~/.ssh/sokoprice
+# Requires: pip install boto3 (the amazon.aws collection is included in "ansible").
+plugin: amazon.aws.aws_ec2
+filters:
+  tag:Project: sokoprice
+  instance-state-name: running
+# Connect to the Elastic IP.
+hostnames:
+  - ip-address
+groups:
+  sokoprice: tags.Project == 'sokoprice'
+keyed_groups:
+  - key: tags.Environment
+    prefix: env
+compose:
+  ansible_user: "'ubuntu'"
+  ansible_python_interpreter: "'/usr/bin/python3'"

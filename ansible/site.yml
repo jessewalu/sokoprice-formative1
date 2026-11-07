@@ -1,0 +1,67 @@
+---
+# -----------------------------------------------------------------------------
+# SokoPrice: configure the server created by Terraform and deploy the app.
+#
+#   ansible-playbook site.yml --private-key ~/.ssh/sokoprice
+#
+# Roles run in order: common -> docker -> security -> app. Every task is
+# idempotent: running the playbook twice changes nothing the second time.
+# Run one part only with tags, for example:  --tags security
+# -----------------------------------------------------------------------------
+- name: Configure the SokoPrice server and deploy the application
+  hosts: "{{ target_hosts | default('sokoprice') }}"
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Wait until the server accepts SSH connections
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 300
+      tags: [always]
+
+    - name: Gather facts
+      ansible.builtin.setup:
+      tags: [always]
+
+    - name: Stop early if the operating system is not supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('22.04', '>=')
+        fail_msg: "This playbook supports Ubuntu 22.04 or newer. Found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}."
+        quiet: true
+      tags: [always]
+
+    - name: Wait for first-boot configuration (cloud-init) to finish
+      ansible.builtin.command: cloud-init status --wait
+      register: site_cloud_init
+      changed_when: false
+      failed_when: false
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: docker
+      tags: [docker]
+    - role: security
+      tags: [security]
+    - role: app
+      tags: [app]
+
+  post_tasks:
+    - name: Check the API from outside the server (through the firewall)
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(inventory_hostname) }}:{{ app_public_port }}/health"
+        status_code: 200
+        timeout: 10
+      register: site_external_health
+      until: site_external_health.status == 200
+      retries: 12
+      delay: 5
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      tags: [app, verify]

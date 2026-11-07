@@ -1,0 +1,7 @@
+---
+# ansible-lint configuration. "production" is the strictest built-in profile.
+profile: production
+exclude_paths:
+  - .git/
+  - .github/
+  - inventory/aws_ec2.yml

@@ -1,0 +1,13 @@
+---
+# Settings shared by every role. Nothing secret is stored here: secrets live in
+# the encrypted file group_vars/all/vault.yml (see vault.yml.example).
+
+# Container image to deploy. publish.yml pushes it to GitHub Container Registry
+# after every merge to main.
+app_image: ghcr.io/jessewalu/sokoprice-formative1:latest
+
+# Public port of the API on the server. Must match Terraform's app_port.
+app_public_port: 80
+
+# Database password comes from the encrypted vault file.
+app_postgres_password: "{{ vault_postgres_password }}"
