@@ -1,0 +1,15 @@
+---
+# EXAMPLE ONLY. Do not put real secrets in this file.
+#
+# Create the real, encrypted file with:
+#   ansible-vault create group_vars/all/vault.yml
+# and paste the two lines below with your own values. The real file is
+# git-ignored and encrypted at rest.
+
+# Required. At least 12 characters from: letters, digits, dot, underscore, tilde, hyphen.
+vault_postgres_password: "CHANGE-ME-to-a-long-random-password"
+
+# Optional. Only needed if the container image is PRIVATE. Use a GitHub token that
+# has the read:packages permission ONLY (never a token with broader rights).
+# vault_ghcr_username: "your-github-username"
+# vault_ghcr_token: "ghp_xxxxxxxxxxxxxxxxxxxx"

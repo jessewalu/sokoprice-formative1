@@ -1,0 +1,14 @@
+---
+docker_apt_repo_url: https://download.docker.com/linux/ubuntu
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+# Log rotation for every container, so logs can never fill the disk.
+docker_log_max_size: 10m
+docker_log_max_file: "3"
+# Users allowed to run docker without sudo (empty on purpose: least privilege).
+docker_users: []

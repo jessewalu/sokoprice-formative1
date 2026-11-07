@@ -1,0 +1,8 @@
+# Python packages for running and checking the playbook (pinned so CI and your
+# laptop behave the same). Install with:  pip install -r requirements.txt
+# The full "ansible" package already contains every collection the playbook uses.
+ansible==14.6.0
+ansible-core==2.21.6
+ansible-lint==26.11.0
+# Only for the dynamic inventory (inventory/aws_ec2.yml):
+boto3>=1.34

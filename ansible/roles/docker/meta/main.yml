@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  author: SokoPrice team
+  description: Docker Engine from the official repository, with a hardened daemon configuration
+  license: MIT
+  min_ansible_version: "2.15"
+  role_name: docker
+  namespace: sokoprice
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags: [sokoprice]
+dependencies: []

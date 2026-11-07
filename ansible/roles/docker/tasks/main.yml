@@ -1,0 +1,61 @@
+---
+- name: Remove conflicting unofficial Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-doc
+      - podman-docker
+    state: absent
+
+- name: Add the official Docker apt repository (signed with Docker's key)
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: "{{ docker_apt_repo_url }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components: stable
+    architectures: "{{ 'arm64' if ansible_facts['architecture'] == 'aarch64' else 'amd64' }}"
+    signed_by: "{{ docker_apt_key_url }}"
+    state: present
+    enabled: true
+  register: docker_repo
+  until: docker_repo is succeeded
+  retries: 3
+  delay: 5
+
+- name: Refresh the package index when the repository changed
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_repo is changed  # noqa: no-handler
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+  notify: Restart docker
+
+- name: Configure the Docker daemon (log rotation, no new privileges)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Allow selected users to run docker
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"
+
+- name: Make sure Docker starts at boot and is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Apply pending handlers now, so the app role starts on a configured Docker
+  ansible.builtin.meta: flush_handlers

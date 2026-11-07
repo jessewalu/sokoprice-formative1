@@ -1,0 +1,103 @@
+---
+- name: Install firewall and intrusion-prevention packages
+  ansible.builtin.apt:
+    name:
+      - ufw
+      - fail2ban
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ------------------------------- Firewall ------------------------------------
+- name: Configure the host firewall
+  block:
+    - name: Allow SSH (rate limited) from the permitted sources
+      community.general.ufw:
+        rule: limit
+        port: "{{ security_ssh_port | string }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        comment: "SSH (rate limited)"
+      loop: "{{ security_ssh_allowed_sources if security_ssh_allowed_sources | length > 0 else ['any'] }}"
+
+    - name: Allow the public application ports
+      community.general.ufw:
+        rule: allow
+        port: "{{ item | string }}"
+        proto: tcp
+        comment: "SokoPrice public port"
+      loop: "{{ security_public_tcp_ports }}"
+
+    - name: Deny all other incoming traffic by default
+      community.general.ufw:
+        direction: incoming
+        default: deny
+
+    - name: Allow outgoing traffic by default
+      community.general.ufw:
+        direction: outgoing
+        default: allow
+
+    - name: Turn the firewall on
+      community.general.ufw:
+        state: enabled
+  rescue:
+    - name: Report a firewall failure
+      ansible.builtin.fail:
+        msg: >-
+          The firewall could not be configured. SSH rules are added BEFORE the
+          firewall is enabled, so you cannot be locked out by this failure.
+
+# ----------------------------- SSH hardening ---------------------------------
+- name: Harden the SSH server
+  block:
+    - name: Make sure the sshd drop-in directory is read
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Include '
+        line: Include /etc/ssh/sshd_config.d/*.conf
+        insertbefore: BOF
+        state: present
+        validate: /usr/sbin/sshd -t -f %s
+
+    - name: Install the hardening drop-in (validated before it is used)
+      ansible.builtin.template:
+        src: sshd_hardening.conf.j2
+        dest: /etc/ssh/sshd_config.d/00-sokoprice-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Restart ssh
+  rescue:
+    - name: Stop if the SSH configuration is invalid
+      ansible.builtin.fail:
+        msg: >-
+          The hardened SSH configuration failed validation (sshd -t), so it was
+          NOT applied. The existing SSH configuration is unchanged.
+
+# -------------------------------- fail2ban -----------------------------------
+- name: Configure fail2ban
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Make sure fail2ban starts at boot and is running
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# ------------------------------ Kernel settings ------------------------------
+- name: Apply kernel network hardening
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value | string }}"
+    sysctl_file: /etc/sysctl.d/90-sokoprice-hardening.conf
+    state: present
+    reload: true
+  loop: "{{ security_sysctl | dict2items }}"

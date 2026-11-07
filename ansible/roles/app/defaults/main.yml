@@ -1,0 +1,16 @@
+---
+app_dir: /opt/sokoprice
+app_user: root
+app_image: ghcr.io/jessewalu/sokoprice-formative1:latest
+app_public_port: 80
+app_container_port: 5000
+app_postgres_db: sokoprice
+app_postgres_user: sokoprice
+# Set in the encrypted vault (group_vars/all/vault.yml); the role refuses to run without it.
+app_postgres_password: "{{ vault_postgres_password | default('') }}"
+# Only needed when the image is private. Both come from the vault.
+app_registry: ghcr.io
+app_registry_username: "{{ vault_ghcr_username | default('') }}"
+app_registry_token: "{{ vault_ghcr_token | default('') }}"
+app_health_retries: 20
+app_health_delay: 5

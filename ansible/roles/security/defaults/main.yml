@@ -1,0 +1,33 @@
+---
+# --- SSH (must match Terraform's ssh_port) ---
+security_ssh_port: 22
+security_ssh_allow_users:
+  - ubuntu
+security_ssh_max_auth_tries: 3
+security_ssh_login_grace_time: 30
+security_ssh_client_alive_interval: 300
+security_ssh_client_alive_count_max: 2
+
+# --- Firewall (UFW). Everything not listed is denied. ---
+security_public_tcp_ports:
+  - "{{ app_public_port | default(80) }}"
+# Address ranges allowed to use SSH (empty list = any address, rate limited).
+# Terraform already restricts SSH at the cloud firewall; this is a second layer.
+security_ssh_allowed_sources: []
+
+# --- fail2ban: ban an address after repeated failed SSH logins ---
+security_fail2ban_maxretry: 4
+security_fail2ban_findtime: 10m
+security_fail2ban_bantime: 1h
+
+# --- Kernel network hardening ---
+security_sysctl:
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.all.log_martians: 1

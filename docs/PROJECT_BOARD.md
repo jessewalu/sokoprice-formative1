@@ -26,7 +26,7 @@ _Last updated for **Formative 2: CI/CD & Containerisation**._ Items 1-8 belong t
 
 ---
 
-## B. Backlog overview (21 items)
+## B. Backlog overview (27 items)
 
 | # | Title | Label(s) | Milestone | Column | Assignee |
 |---|-------|----------|-----------|--------|----------|
@@ -42,7 +42,7 @@ _Last updated for **Formative 2: CI/CD & Containerisation**._ Items 1-8 belong t
 | 10 | Market agent price-submission endpoint with API-key auth | `feature` `security` | Formative 2 | Backlog | @Kkadi20 |
 | 11 | Add lint step and coverage report to CI | `devops` `testing` | Formative 2 | Done | @Karabo-jpg |
 | 12 | Price-change SMS alerts | `feature` | Formative 3 | Backlog | @Karabo-jpg |
-| 13 | Configure Terraform for cloud infrastructure | `devops` | Formative 3 | Backlog | @jessewalu |
+| 13 | Configure Terraform for cloud infrastructure | `devops` | Formative 3 | In Progress | @jessewalu |
 | 14 | Add Kinyarwanda language option to USSD | `feature` | Formative 3 | Backlog | @Kkadi20 |
 | 15 | Harden Dockerfile: multi-stage build, health check, layer caching | `devops` `security` | Formative 2 | Done | @Karabo-jpg |
 | 16 | Docker Compose: app + PostgreSQL with networks, volume and health checks | `devops` | Formative 2 | Done | @jessewalu |
@@ -51,6 +51,12 @@ _Last updated for **Formative 2: CI/CD & Containerisation**._ Items 1-8 belong t
 | 19 | Publish Docker image to GHCR after merge to `main` | `devops` | Formative 2 | Done | @jessewalu |
 | 20 | Update branch protection to require the new CI checks | `security` `devops` | Formative 2 | In Progress | @Kkadi20 |
 | 21 | Collect CI evidence: 3 green runs, 1 red-then-fixed run, reviewed PRs | `devops` `documentation` | Formative 2 | In Progress | @Karabo-jpg |
+| 22 | Ansible playbook: Docker, firewall, SSH hardening, app deployment | `devops` `security` | Formative 3 | In Progress | @Karabo-jpg |
+| 23 | DevSecOps: dependency, code, container and IaC scans in CI | `devops` `security` | Formative 3 | In Progress | @Kkadi20 |
+| 24 | SECURITY.md: findings, remediation and accepted risks | `security` `documentation` | Formative 3 | In Progress | @Kkadi20 |
+| 25 | Fix Bandit findings in `run.py` and `scripts/healthcheck.py` | `security` | Formative 3 | In Progress | @jessewalu |
+| 26 | Require the new security and IaC checks in branch protection | `security` `devops` | Formative 3 | Backlog | @Kkadi20 |
+| 27 | Collect Formative 3 evidence: Terraform plan, Ansible run, scan results | `devops` `documentation` | Formative 3 | Backlog | @Karabo-jpg |
 
 > Items 6, 7 and 8 were first delivered in Formative 1 and are extended by items 15, 18 and 20. When you maintain the real board, keep the Column values here in sync with it.
 > Item 21 is a **team** task: all three members must contribute reviewed pull requests.
@@ -246,6 +252,54 @@ _Tip: a check only appears in the dropdown after it has run at least once, so pu
 - [ ] Pull requests authored and reviewed by all three team members
 - [ ] Board screenshot saved as `docs/screenshots/project-board.png`
 
+### #22 Ansible playbook: Docker, firewall, SSH hardening, app deployment
+**As a** DevOps engineer, **I want** the server configured by code **so that** it is identical every time and can be rebuilt in minutes.
+**Acceptance criteria**
+- [ ] `ansible/site.yml` with roles `common`, `docker`, `security`, `app`
+- [ ] Docker installed from the official repository; app and PostgreSQL started with Docker Compose
+- [ ] Firewall (UFW) default deny, SSH key-only, no root login, fail2ban
+- [ ] Static and dynamic inventory files
+- [ ] Second run reports `changed=0` (idempotent)
+- [ ] `ansible/README.md` with run instructions; `ansible-lint` passes
+
+### #23 DevSecOps: dependency, code, container and IaC scans in CI
+**As a** security-minded team, **I want** automatic scans on every pull request **so that** vulnerabilities are found before merge.
+**Acceptance criteria**
+- [ ] pip-audit (dependencies), Bandit (code), Trivy (container) and Checkov (infrastructure) run in `ci.yml`
+- [ ] Each has a severity threshold that fails the build
+- [ ] Dependabot enabled for pip, Docker, Actions and Terraform
+- [ ] A pull request with a deliberate finding is shown as failing, then fixed
+
+### #24 SECURITY.md: findings, remediation and accepted risks
+**As a** reviewer, **I want** the security findings written down **so that** every risk has an owner and a reason.
+**Acceptance criteria**
+- [ ] Each finding listed with tool, severity, fix and status
+- [ ] Each accepted risk has a reason and a compensating control
+- [ ] First Trivy result from CI recorded
+
+### #25 Fix Bandit findings in `run.py` and `scripts/healthcheck.py`
+**As a** developer, **I want** the code scan clean **so that** the SAST job passes.
+**Acceptance criteria**
+- [ ] `run.py` no longer binds `0.0.0.0` by default (B104)
+- [ ] Health probe uses `http.client` instead of `urllib` (B310)
+- [ ] New tests for the probe; all tests still pass
+
+### #26 Require the new security and IaC checks in branch protection
+**As a** team member, **I want** `main` to require the scans **so that** nothing merges with a known vulnerability.
+**Acceptance criteria**
+- [ ] Required checks added: `dependency-scan (pip-audit)`, `sast-scan (Bandit)`, `container-scan (Trivy)`, `iac-scan (Checkov)`, `iac-validate (Terraform + Ansible)`
+- [ ] Screenshot saved as `docs/screenshots/branch-protection-f3.png`
+
+_Tip: a check only appears in the dropdown after it has run once, so open the pull request first._
+
+### #27 Collect Formative 3 evidence
+**As a** course assessor, **I want** proof the infrastructure and scans work.
+**Acceptance criteria**
+- [ ] `terraform plan` (and `apply` if an account is available) output saved
+- [ ] `ansible-playbook` run output with `changed=0` on the second run
+- [ ] CI run with all scan jobs green, and one run where a scan failed and was fixed
+- [ ] Links added to the README
+
 ---
 
 ## D. Submission checklist
@@ -275,3 +329,11 @@ _Tip: a check only appears in the dropdown after it has run at least once, so pu
 - [ ] At least 1 pull request showing CI integration and code review _(item #21)_
 - [ ] Multiple team members contributing, with reviews on pull requests
 - [ ] Project board kept up to date and screenshot included
+
+**Formative 3 (Terraform, Ansible, DevSecOps)**
+- [ ] `terraform/` with VPC, compute instance, security rules, variables, outputs and README
+- [ ] `ansible/` with playbook, roles, inventory and README
+- [ ] At least 2 scan types running in GitHub Actions on every pull request (we run 4, plus IaC validation)
+- [ ] `SECURITY.md` with findings, remediation and accepted risks
+- [ ] Required status checks updated in branch protection
+- [ ] Pull requests from all three members, reviewed

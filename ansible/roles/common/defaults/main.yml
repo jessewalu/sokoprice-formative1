@@ -1,0 +1,12 @@
+---
+# Base packages every server gets.
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - unattended-upgrades
+  - apt-transport-https
+  - python3-apt
+common_timezone: UTC
+# Apply security updates automatically (no feature upgrades, no automatic reboot).
+common_unattended_upgrades: true

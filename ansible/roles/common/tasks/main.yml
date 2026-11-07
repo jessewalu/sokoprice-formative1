@@ -1,0 +1,26 @@
+---
+- name: Update the package index and install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: common_apt
+  until: common_apt is succeeded
+  retries: 5
+  delay: 10
+
+- name: Set the time zone
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+
+- name: Enable automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_unattended_upgrades | bool
