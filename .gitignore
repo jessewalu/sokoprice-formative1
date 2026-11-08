@@ -102,3 +102,17 @@ docker-compose.override.yml
 *.tfvars
 !example.tfvars
 crash.log
+
+# =========================
+# Terraform / Ansible (Formative 3)
+# =========================
+# Keep .terraform.lock.hcl committed; never commit state, variable files or vault secrets.
+.terraform/
+crash.log
+*.tfplan
+tfplan
+ansible/group_vars/all/vault.yml
+ansible/inventory/hosts.ini.bak
+*.retry
+.vault_pass
+.vault_password

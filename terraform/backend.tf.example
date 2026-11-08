@@ -1,0 +1,21 @@
+# -----------------------------------------------------------------------------
+# OPTIONAL: remote state (recommended for a team).
+#
+# By default Terraform keeps its state in a local file (terraform.tfstate), which
+# is git-ignored because state can contain sensitive values. A team should share
+# state in an encrypted S3 bucket with locking instead:
+#
+#   1. Create the bucket (versioning and encryption on) and a DynamoDB table with
+#      the partition key "LockID" (string).
+#   2. Copy this file to backend.tf and replace the REPLACE-... placeholders.
+#   3. Run: terraform init -migrate-state
+# -----------------------------------------------------------------------------
+terraform {
+  backend "s3" {
+    bucket         = "REPLACE-with-your-state-bucket"
+    key            = "sokoprice/dev/terraform.tfstate"
+    region         = "REPLACE-with-the-bucket-region"
+    encrypt        = true
+    dynamodb_table = "REPLACE-with-your-lock-table"
+  }
+}

@@ -1,0 +1,25 @@
+# Production environment. Use with:
+#   terraform plan -var-file=environments/prod.tfvars
+# (copy this file to environments/prod.tfvars first; it is git-ignored)
+#
+# A different CIDR range keeps prod and dev networks apart (they can be peered
+# later without overlapping addresses).
+
+aws_region  = "eu-west-1"
+environment = "prod"
+
+vpc_cidr            = "10.30.0.0/16"
+public_subnet_cidrs = ["10.30.1.0/24", "10.30.2.0/24"]
+
+admin_cidrs    = ["203.0.113.25/32"]
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE sokoprice"
+
+# More headroom, detailed metrics and the longest log retention.
+instance_type              = "t3.small"
+root_volume_size           = 30
+enable_detailed_monitoring = true
+flow_log_retention_days    = 365
+
+extra_tags = {
+  Owner = "sokoprice-team"
+}

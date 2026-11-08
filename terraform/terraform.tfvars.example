@@ -1,0 +1,29 @@
+# -----------------------------------------------------------------------------
+# Example values. Copy this file to terraform.tfvars and edit it:
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is git-ignored. It contains no secrets, but it does contain
+# your own IP address, which does not belong in a public repository.
+# -----------------------------------------------------------------------------
+
+# Region closest to your users (an opt-in region such as af-south-1 must first
+# be enabled in your AWS account settings).
+aws_region = "eu-west-1"
+
+project_name = "sokoprice"
+environment  = "dev"
+
+# Your public IP address with /32. Find it with:  curl https://checkip.amazonaws.com
+# 0.0.0.0/0 is rejected on purpose.
+admin_cidrs = ["203.0.113.25/32"]
+
+# The text of your PUBLIC key file (never the private key):
+#   ssh-keygen -t ed25519 -f ~/.ssh/sokoprice -C "sokoprice"
+#   cat ~/.ssh/sokoprice.pub
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE sokoprice"
+
+# Optional overrides (defaults are shown in variables.tf).
+# instance_type    = "t3.micro"
+# root_volume_size = 20
+# app_port         = 80
