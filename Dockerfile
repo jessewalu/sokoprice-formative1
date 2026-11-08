@@ -52,6 +52,16 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PORT=5000
 
+# SECURITY: install the latest security patches for the operating system
+# packages in the base image (the container scan in CI fails on fixable HIGH or
+# CRITICAL findings), and remove pip, setuptools and wheel from the final image:
+# the app only needs the virtual environment copied below, and fewer packages
+# means fewer things that can have vulnerabilities.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip setuptools wheel
+
 # SECURITY: create an unprivileged system user with a fixed UID/GID, no home
 # directory and no login shell. The app never runs as root.
 RUN groupadd --system --gid 10001 appgroup \
