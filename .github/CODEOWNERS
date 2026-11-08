@@ -8,6 +8,9 @@
 
 # DevOps: CI/CD, container and infrastructure files
 /.github/               @jessewalu @Karabo-jpg
+/terraform/             @jessewalu @Kkadi20
+/ansible/               @Karabo-jpg @Kkadi20
+/SECURITY.md            @Kkadi20 @jessewalu
 /Dockerfile             @jessewalu @Karabo-jpg
 /docker-compose.yml     @jessewalu @Karabo-jpg
 

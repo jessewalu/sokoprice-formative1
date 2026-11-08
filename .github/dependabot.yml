@@ -1,0 +1,25 @@
+# Dependabot opens pull requests when a dependency has a newer or a security-fixed
+# version. Security updates are applied through the normal PR + CI + review path.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly
+    labels: [dependencies]
