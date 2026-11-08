@@ -5,4 +5,4 @@ ansible==14.6.0
 ansible-core==2.21.6
 ansible-lint==26.11.0
 # Only for the dynamic inventory (inventory/aws_ec2.yml):
-boto3>=1.34
+boto3>=1.43.125
