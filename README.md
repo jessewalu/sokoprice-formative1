@@ -6,7 +6,7 @@
 [![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml)
 [![Publish image](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml)
 
-**Contents:** [Problem](#1-problem-statement) · [Users](#2-target-users) · [Features](#3-core-features) · [Stack](#4-technology-stack) · [Run locally](#5-how-to-run-the-app) · [Docker](#6-containerisation-with-docker) · [Docker Compose](#7-docker-compose) · [CI pipeline](#8-continuous-integration-github-actions) · [Branch protection](#9-branch-protection-and-collaboration-evidence) · [Structure](#10-project-structure) · [Security](#11-security-practices-shift-left) · [Project management](#12-project-management) · [Contributing](#13-contributing) · [Team](#14-team) · [License](#15-license)
+**Contents:** [Problem](#1-problem-statement) · [Users](#2-target-users) · [Features](#3-core-features) · [Stack](#4-technology-stack) · [Run locally](#5-how-to-run-the-app) · [Docker](#6-containerisation-with-docker) · [Docker Compose](#7-docker-compose) · [CI pipeline](#8-continuous-integration-github-actions) · [Branch protection](#9-branch-protection-and-collaboration-evidence) · [Structure](#10-project-structure) · [Security](#11-security-practices-shift-left) · [Project management](#12-project-management) · [Contributing](#13-contributing) · [Team](#14-team) · [Terraform](#15-infrastructure-as-code-terraform) · [Ansible](#16-configuration-management-ansible) · [DevSecOps](#17-devsecops-security-scanning) · [License](#18-license)
 
 ---
 
@@ -272,6 +272,9 @@ Superseded runs on the same ref are cancelled (`concurrency`), and the workflow 
         ├──> docker-build
  test ──┘   (needs lint and test)
  (py3.11, py3.12)
+
+ dependency-scan · sast-scan · container-scan · iac-scan · iac-validate
+ (security and infrastructure checks, run in parallel; see section 17)
 ```
 
 | Job | What it does | Fails when |
@@ -279,6 +282,11 @@ Superseded runs on the same ref are cancelled (`concurrency`), and the workflow 
 | `lint` | Checkout, set up Python 3.12 (pip cache), install dependencies, `ruff check .` | Ruff reports any error |
 | `test (py3.11)` / `test (py3.12)` | Matrix over two Python versions with a real PostgreSQL 16 service container; runs `pytest --cov=app --cov-fail-under=80`; uploads `test-results.xml` and `coverage.xml` as artifacts | A test fails, coverage is under 80%, or a dependency cannot be installed |
 | `docker-build` | Builds the image with Buildx and GitHub Actions layer cache, smoke-tests the container (waits for `healthy`, calls `/health`, `/api/prices/maize`, `/ussd`), then validates and runs the full Compose stack and checks `/api/stats` reports `connected` | The image fails to build, the container is not healthy, any request fails, or Compose cannot start |
+| `dependency-scan` | `pip-audit` on `requirements.txt` | Any known vulnerability |
+| `sast-scan` | Bandit on the application code | Medium or high severity finding |
+| `container-scan` | Builds the image and scans it with Trivy | Fixable HIGH or CRITICAL vulnerability |
+| `iac-scan` | Checkov on Terraform, Dockerfile, workflows, Ansible and secrets | Any failed check |
+| `iac-validate` | `terraform fmt -check`, `terraform validate`, `ansible-lint`, playbook syntax check | Formatting, syntax or lint error |
 
 `docker-build` only starts after `lint` and `test` pass, and any failing step fails the whole pipeline.
 
@@ -304,7 +312,7 @@ Settings → Branches → rule for `main`:
 | Require a pull request before merging | No one pushes directly to `main`; every change is visible and discussed |
 | Require 1 approval (Code owners review) | A second pair of eyes catches bugs; [`CODEOWNERS`](.github/CODEOWNERS) assigns reviewers |
 | Dismiss stale approvals on new commits | An approval only counts for the code that was actually reviewed |
-| **Require status checks to pass:** `lint`, `test (py3.11)`, `test (py3.12)`, `docker-build` | Broken, unlinted or un-buildable code cannot be merged |
+| **Require status checks to pass:** `lint`, `test (py3.11)`, `test (py3.12)`, `docker-build`, `dependency-scan (pip-audit)`, `sast-scan (Bandit)`, `container-scan (Trivy)`, `iac-scan (Checkov)`, `iac-validate (Terraform + Ansible)` | Broken, unlinted or un-buildable code cannot be merged |
 | Require branches to be up to date | Changes are tested against the latest `main` |
 | Require conversation resolution | Review comments cannot be ignored |
 | Include administrators | The rules apply to everyone, with no exceptions |
@@ -346,14 +354,20 @@ sokoprice-formative1/
 ├── scripts/healthcheck.py   # Container health probe (stdlib only)
 ├── tests/
 │   ├── test_app.py          # REST API + USSD endpoint tests
+│   ├── test_healthcheck.py  # Health probe tests
 │   ├── test_db.py           # Request-log tests (Postgres test runs in CI)
 │   ├── test_prices.py       # Price logic unit tests
 │   └── test_ussd.py         # USSD menu unit tests
 ├── docs/PROJECT_BOARD.md    # GitHub Projects backlog, user stories, status
 ├── .github/
-│   ├── workflows/ci.yml       # CI: lint, test (matrix), Docker build + smoke test
+│   ├── workflows/ci.yml       # CI: lint, test (matrix), Docker build, security scans, IaC checks
+│   ├── dependabot.yml         # Weekly dependency update pull requests
 │   ├── workflows/publish.yml  # Push image to GHCR after merge to main
 │   └── CODEOWNERS             # Required reviewers
+├── terraform/               # Infrastructure as Code: VPC, server, firewall (section 15)
+├── ansible/                 # Server configuration and deployment (section 16)
+├── SECURITY.md              # Scan results, remediation, accepted risks (section 17)
+├── requirements-security.txt # Pinned security scanners
 ├── Dockerfile               # Multi-stage, non-root, health check, gunicorn
 ├── docker-compose.yml       # App + PostgreSQL, networks, volume, health checks
 ├── .dockerignore            # Keeps the build context small and secret-free
@@ -377,6 +391,7 @@ sokoprice-formative1/
 - The USSD log stores only the menu path, **never phone numbers**.
 - CI uses least-privilege `permissions`, and image publishing uses the short-lived `GITHUB_TOKEN`.
 - `main` is protected by branch protection rules (section 9).
+- Five automated security and infrastructure scans run on every pull request (section 17); findings and accepted risks are documented in [`SECURITY.md`](SECURITY.md).
 
 ## 12. Project Management
 
@@ -388,7 +403,7 @@ Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Don
 2. Commit with clear messages (`feat:`, `fix:`, `docs:`, `build:`, `test:`).
 3. Run `ruff check .` and `pytest -q` locally before pushing.
 4. Open a pull request into `main`, linked to its issue (e.g. `Closes #5`).
-5. Wait for green checks (`lint`, `test`, `docker-build`) and one teammate's approval, resolve all review conversations, then merge.
+5. Wait for green checks (`lint`, `test`, `docker-build`, and the security checks) and one teammate's approval, resolve all review conversations, then merge.
 
 ## 14. Team
 
@@ -400,6 +415,48 @@ Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Don
 
 Team contribution sheet: https://docs.google.com/spreadsheets/d/1k8UOI845SVSR8oId_86h8xpJYibwzxaeQ3t5jsGJFbw/edit?usp=sharing
 
-## 15. License
+## 15. Infrastructure as Code (Terraform)
+
+The cloud infrastructure is defined in [`terraform/`](terraform/README.md): a **VPC** with public subnets, an internet gateway and flow logs, a locked-down **security group** (SSH from admin addresses only, the API port, restricted outbound) and an Ubuntu **EC2 instance** with an Elastic IP. The code is split into three modules (`network`, `security`, `compute`), takes every environment-specific value as a variable (no secrets, no hard-coded region), and exposes outputs including a ready-made Ansible inventory.
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars    # set region, your IP /32, your public SSH key
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan
+terraform output
+```
+
+Full instructions, variable table and security design: [`terraform/README.md`](terraform/README.md).
+
+## 16. Configuration Management (Ansible)
+
+The playbook in [`ansible/`](ansible/README.md) configures the server Terraform created: it installs Docker, applies **firewall (UFW) and SSH hardening** (key-only, no root, fail2ban), and deploys the SokoPrice container with PostgreSQL using Docker Compose. It is built from four roles (`common`, `docker`, `security`, `app`), is idempotent, validates risky changes before applying them, supports a static and a dynamic (AWS) inventory, and keeps the database password in Ansible Vault.
+
+```bash
+cd ansible
+pip install -r requirements.txt && ansible-galaxy collection install -r requirements.yml
+terraform -chdir=../terraform output -raw ansible_inventory > inventory/hosts.ini
+ansible-vault encrypt group_vars/all/vault.yml     # after copying vault.yml.example
+ansible-playbook site.yml --private-key ~/.ssh/sokoprice --ask-vault-pass
+```
+
+Full instructions: [`ansible/README.md`](ansible/README.md).
+
+## 17. DevSecOps (Security Scanning)
+
+Security checks run in GitHub Actions on **every pull request** (jobs in section 8):
+
+| Scan type | Tool | Threshold |
+|-----------|------|-----------|
+| Dependency scan | pip-audit | Any known vulnerability |
+| Static code analysis | Bandit | Medium or higher |
+| Container image scan | Trivy | Fixable HIGH or CRITICAL |
+| Infrastructure-as-Code scan | Checkov | Any failed check |
+
+[`SECURITY.md`](SECURITY.md) documents the findings, how each was fixed, and the risks the team accepted with the reason. Dependabot opens weekly update pull requests. Run the scans locally with `pip install -r requirements-security.txt`.
+
+## 18. License
 
 Released under the [MIT License](LICENSE).

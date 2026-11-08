@@ -1,0 +1,6 @@
+# Security scanning tools used by .github/workflows/ci.yml and runnable locally:
+#   pip install -r requirements-security.txt
+# Pinned so a new release can never silently change what the pipeline checks.
+pip-audit==2.10.1
+bandit==1.9.4
+checkov==3.4.3
