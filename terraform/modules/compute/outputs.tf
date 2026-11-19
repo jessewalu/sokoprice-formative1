@@ -1,29 +1,34 @@
-output "instance_id" {
-  description = "ID of the EC2 instance."
-  value       = aws_instance.this.id
+output "bastion_instance_id" {
+  description = "ID of the bastion host."
+  value       = aws_instance.bastion.id
 }
 
-output "public_ip" {
-  description = "Public (Elastic) IP address of the instance."
-  value       = aws_eip.this.public_ip
+output "bastion_public_ip" {
+  description = "Public (Elastic) IP address of the bastion host."
+  value       = aws_eip.bastion.public_ip
 }
 
-output "private_ip" {
-  description = "Private IP address of the instance inside the VPC."
-  value       = aws_instance.this.private_ip
+output "bastion_private_ip" {
+  description = "Private IP address of the bastion host inside the VPC."
+  value       = aws_instance.bastion.private_ip
+}
+
+output "app_instance_id" {
+  description = "ID of the application server."
+  value       = aws_instance.app.id
+}
+
+output "app_private_ip" {
+  description = "Private IP address of the application server (reachable through the bastion only)."
+  value       = aws_instance.app.private_ip
 }
 
 output "ssh_user" {
-  description = "Operating system user to use for SSH and Ansible."
+  description = "Operating system user for SSH."
   value       = var.ssh_user
 }
 
-output "ami_id" {
-  description = "ID of the machine image the instance was launched from."
-  value       = data.aws_ami.ubuntu.id
-}
-
-output "instance_role_name" {
-  description = "Name of the IAM role attached to the instance."
-  value       = aws_iam_role.instance.name
+output "key_name" {
+  description = "Name of the EC2 key pair."
+  value       = aws_key_pair.this.key_name
 }

@@ -1,11 +1,14 @@
 # -----------------------------------------------------------------------------
-# Compute module: the application server.
+# Compute module: the bastion host and the application server.
 #
-#   * Latest official Ubuntu 24.04 LTS image from the pinned publisher.
-#   * Encrypted gp3 root volume, IMDSv2 required (blocks SSRF credential theft).
-#   * IAM role with only AWS Systems Manager access, so the server can also be
-#     reached with Session Manager without opening any extra port.
-#   * Elastic IP, so the address does not change when the server restarts.
+#   Bastion host        Small server in a PUBLIC subnet with an Elastic IP. It is
+#                       the only way to reach the private network over SSH.
+#   Application server  Server in a PRIVATE subnet: no public IP, reachable only
+#                       from the load balancer (web) and the bastion (SSH).
+#
+# Both: latest official Ubuntu 24.04 LTS image from the pinned publisher,
+# encrypted gp3 root volume, IMDSv2 required (blocks SSRF credential theft), and
+# an IAM role with only what that server needs.
 # -----------------------------------------------------------------------------
 
 data "aws_partition" "current" {}
@@ -44,31 +47,118 @@ data "aws_iam_policy_document" "ec2_assume_role" {
   }
 }
 
-resource "aws_iam_role" "instance" {
-  name_prefix        = "${var.name_prefix}-ec2-"
+# ------------------------------ Bastion role ---------------------------------
+
+resource "aws_iam_role" "bastion" {
+  name_prefix        = "${var.name_prefix}-bastion-"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.instance.name
+resource "aws_iam_role_policy_attachment" "bastion_ssm" {
+  role       = aws_iam_role.bastion.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_instance_profile" "this" {
-  name_prefix = "${var.name_prefix}-"
-  role        = aws_iam_role.instance.name
+resource "aws_iam_instance_profile" "bastion" {
+  name_prefix = "${var.name_prefix}-bastion-"
+  role        = aws_iam_role.bastion.name
 }
 
-# ------------------------------ Instance -------------------------------------
+# --------------------------- Application server role ------------------------
 
-resource "aws_instance" "this" {
+resource "aws_iam_role" "app" {
+  name_prefix        = "${var.name_prefix}-app-"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "app_ssm" {
+  role       = aws_iam_role.app.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# The Docker log driver on the server ships container logs to CloudWatch Logs.
+# It may write to this one log group and nothing else.
+data "aws_iam_policy_document" "app_logs" {
+  statement {
+    sid       = "WriteContainerLogsToThisLogGroupOnly"
+    effect    = "Allow"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${var.app_log_group_arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "app_logs" {
+  name_prefix = "ship-container-logs-"
+  role        = aws_iam_role.app.id
+  policy      = data.aws_iam_policy_document.app_logs.json
+}
+
+resource "aws_iam_instance_profile" "app" {
+  name_prefix = "${var.name_prefix}-app-"
+  role        = aws_iam_role.app.name
+}
+
+# ------------------------------ Bastion host ---------------------------------
+
+resource "aws_instance" "bastion" {
+  #checkov:skip=CKV_AWS_126:Detailed (1-minute) monitoring costs extra, so it is a variable that is off for dev and on for prod (see environments/prod.tfvars.example).
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.bastion_instance_type
+  subnet_id                   = var.bastion_subnet_id
+  vpc_security_group_ids      = [var.bastion_security_group_id]
+  key_name                    = aws_key_pair.this.key_name
+  iam_instance_profile        = aws_iam_instance_profile.bastion.name
+  associate_public_ip_address = false
+  monitoring                  = var.enable_detailed_monitoring
+  ebs_optimized               = true
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  root_block_device {
+    volume_type           = "gp3"
+    volume_size           = 10
+    encrypted             = true
+    delete_on_termination = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-bastion"
+    Role = "bastion"
+  }
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
+}
+
+# The Elastic IP keeps the bastion address stable when the server restarts.
+resource "aws_eip" "bastion" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${var.name_prefix}-bastion-eip"
+  }
+}
+
+resource "aws_eip_association" "bastion" {
+  instance_id   = aws_instance.bastion.id
+  allocation_id = aws_eip.bastion.id
+}
+
+# --------------------------- Application server ------------------------------
+
+resource "aws_instance" "app" {
   #checkov:skip=CKV_AWS_126:Detailed (1-minute) monitoring costs extra, so it is a variable that is off for dev and on for prod (see environments/prod.tfvars.example).
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
-  subnet_id                   = var.subnet_id
-  vpc_security_group_ids      = var.security_group_ids
+  subnet_id                   = var.app_subnet_id
+  vpc_security_group_ids      = [var.app_security_group_id]
   key_name                    = aws_key_pair.this.key_name
-  iam_instance_profile        = aws_iam_instance_profile.this.name
+  iam_instance_profile        = aws_iam_instance_profile.app.name
   associate_public_ip_address = false
   monitoring                  = var.enable_detailed_monitoring
   ebs_optimized               = true
@@ -88,6 +178,7 @@ resource "aws_instance" "this" {
 
   tags = {
     Name = "${var.name_prefix}-app"
+    Role = "app"
   }
 
   # A newer machine image must not force the server to be rebuilt. Patches are
@@ -95,17 +186,4 @@ resource "aws_instance" "this" {
   lifecycle {
     ignore_changes = [ami]
   }
-}
-
-resource "aws_eip" "this" {
-  domain = "vpc"
-
-  tags = {
-    Name = "${var.name_prefix}-eip"
-  }
-}
-
-resource "aws_eip_association" "this" {
-  instance_id   = aws_instance.this.id
-  allocation_id = aws_eip.this.id
 }
