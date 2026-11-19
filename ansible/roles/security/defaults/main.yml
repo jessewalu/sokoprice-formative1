@@ -7,6 +7,11 @@ security_ssh_max_auth_tries: 3
 security_ssh_login_grace_time: 30
 security_ssh_client_alive_interval: 300
 security_ssh_client_alive_count_max: 2
+# "no" for ordinary servers. The bastion host sets "local" because jumping
+# through it to the private network needs TCP forwarding.
+security_ssh_allow_tcp_forwarding: "no"
+# "limit" rate-limits SSH (6 connections in 30 seconds per address); "allow" does not.
+security_ssh_rule: limit
 
 # --- Firewall (UFW). Everything not listed is denied. ---
 security_public_tcp_ports:

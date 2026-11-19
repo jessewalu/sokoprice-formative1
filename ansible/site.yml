@@ -1,18 +1,59 @@
 ---
 # -----------------------------------------------------------------------------
-# SokoPrice: configure the server created by Terraform and deploy the app.
+# SokoPrice: configure the servers created by Terraform and deploy the app.
 #
-#   ansible-playbook site.yml --private-key ~/.ssh/sokoprice
+#   ansible-playbook site.yml --private-key ~/.ssh/sokoprice --ask-vault-pass
 #
-# Roles run in order: common -> docker -> security -> app. Every task is
-# idempotent: running the playbook twice changes nothing the second time.
-# Run one part only with tags, for example:  --tags security
+# Play 1 hardens the bastion host (the jump host in the public subnet).
+# Play 2 configures the application server in the private subnet (reached
+#        through the bastion) and deploys the container: common -> docker ->
+#        security -> app.
+#
+# Every task is idempotent: running the playbook twice changes nothing the
+# second time. Run one part only with tags, for example:  --tags security
 # -----------------------------------------------------------------------------
+- name: Harden the bastion host
+  hosts: bastion
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Wait until the bastion accepts SSH connections
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 300
+      tags: [always]
+
+    - name: Gather facts
+      ansible.builtin.setup:
+      tags: [always]
+
+    - name: Stop early if the operating system is not supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('22.04', '>=')
+        fail_msg: "This playbook supports Ubuntu 22.04 or newer. Found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}."
+        quiet: true
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: security
+      tags: [security]
+
 - name: Configure the SokoPrice server and deploy the application
   hosts: "{{ target_hosts | default('sokoprice') }}"
   become: true
   gather_facts: false
   any_errors_fatal: true
+
+  vars:
+    # Public address of the live application (the load balancer). When set, the
+    # playbook finishes by checking the application through it.
+    site_public_url: "{{ lookup('ansible.builtin.env', 'APP_URL') | default('', true) }}"
 
   pre_tasks:
     - name: Wait until the server accepts SSH connections
@@ -52,16 +93,38 @@
       tags: [app]
 
   post_tasks:
-    - name: Check the API from outside the server (through the firewall)
+    - name: Check the application through the load balancer (the public URL)
       ansible.builtin.uri:
-        url: "http://{{ ansible_host | default(inventory_hostname) }}:{{ app_public_port }}/health"
+        url: "{{ site_public_url }}/health"
         status_code: 200
         timeout: 10
       register: site_external_health
       until: site_external_health.status == 200
-      retries: 12
+      retries: 24
       delay: 5
       delegate_to: localhost
       become: false
       changed_when: false
+      when: site_public_url | length > 0
+      tags: [app, verify]
+
+    - name: Read the application statistics (proves the database connection works)
+      ansible.builtin.uri:
+        url: "{{ site_public_url }}/api/stats"
+        return_content: true
+        timeout: 10
+      register: site_stats
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      when: site_public_url | length > 0
+      tags: [app, verify]
+
+    - name: Show the deployment result
+      ansible.builtin.debug:
+        msg:
+          - "Deployed image: {{ app_image }}"
+          - "Live URL: {{ site_public_url if site_public_url | length > 0 else 'not checked (APP_URL is not set)' }}"
+          - "Statistics endpoint: HTTP {{ site_stats.status | default('not checked') }}"
       tags: [app, verify]

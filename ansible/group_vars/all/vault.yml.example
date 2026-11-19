@@ -1,15 +1,21 @@
 ---
 # EXAMPLE ONLY. Do not put real secrets in this file.
 #
+# You only need a vault file for MANUAL runs from your own computer. The
+# deployment pipeline gets the database password from AWS Secrets Manager.
+#
 # Create the real, encrypted file with:
 #   ansible-vault create group_vars/all/vault.yml
-# and paste the two lines below with your own values. The real file is
-# git-ignored and encrypted at rest.
+# and paste the line(s) below with your own values. The real file is git-ignored
+# and encrypted at rest.
 
-# Required. At least 12 characters from: letters, digits, dot, underscore, tilde, hyphen.
-vault_postgres_password: "CHANGE-ME-to-a-long-random-password"
+# The database password. Get it with the command printed by:
+#   terraform output db_password_command
+# At least 12 characters from: letters, digits, dot, underscore, tilde, hyphen.
+vault_db_password: "CHANGE-ME-paste-the-password-from-secrets-manager"
 
-# Optional. Only needed if the container image is PRIVATE. Use a GitHub token that
-# has the read:packages permission ONLY (never a token with broader rights).
+# Optional. Only for a manual run against a PRIVATE GitHub container registry
+# (not needed with ECR, where the pipeline supplies a login token). Use a GitHub
+# token that has the read:packages permission ONLY.
 # vault_ghcr_username: "your-github-username"
 # vault_ghcr_token: "ghp_xxxxxxxxxxxxxxxxxxxx"
