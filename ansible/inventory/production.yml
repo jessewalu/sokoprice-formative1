@@ -1,0 +1,25 @@
+---
+# Inventory used by the deployment pipeline (cd.yml). The addresses come from
+# environment variables that the pipeline fills from the GitHub repository
+# variables, so nothing environment-specific is stored in the repository.
+#
+#   BASTION_HOST     public IP of the bastion host
+#   APP_PRIVATE_IP   private IP of the application server
+#
+# The application server is reached through the bastion (see group_vars/app.yml).
+all:
+  vars:
+    ansible_user: ubuntu
+    ansible_python_interpreter: /usr/bin/python3
+  children:
+    bastion:
+      hosts:
+        bastion:
+          ansible_host: "{{ lookup('ansible.builtin.env', 'BASTION_HOST') }}"
+    app:
+      hosts:
+        app:
+          ansible_host: "{{ lookup('ansible.builtin.env', 'APP_PRIVATE_IP') }}"
+    sokoprice:
+      children:
+        app:

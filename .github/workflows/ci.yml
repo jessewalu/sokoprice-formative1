@@ -11,6 +11,8 @@ on:
   pull_request:
     branches:
       - main
+  # Lets cd.yml run the very same checks before it deploys anything.
+  workflow_call:
 
 permissions:
   contents: read
@@ -362,7 +364,7 @@ jobs:
 
       - name: Ansible syntax check
         run: |
-          printf 'vault_postgres_password: "ci-only-placeholder-value"\n' > group_vars/all/vault.yml
+          printf 'vault_db_password: "ci-only-placeholder-value"\n' > group_vars/all/vault.yml
           ansible-playbook site.yml --syntax-check
           rm -f group_vars/all/vault.yml
         working-directory: ansible

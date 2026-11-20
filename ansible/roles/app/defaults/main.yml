@@ -1,16 +1,26 @@
 ---
+# Where the application lives on the server.
 app_dir: /opt/sokoprice
 app_user: root
-app_image: ghcr.io/jessewalu/sokoprice-formative1:latest
+
+# Ports: the container listens on app_container_port; the server publishes it on
+# app_public_port, which the load balancer (and the firewall) allow.
 app_public_port: 80
 app_container_port: 5000
-app_postgres_db: sokoprice
-app_postgres_user: sokoprice
-# Set in the encrypted vault (group_vars/all/vault.yml); the role refuses to run without it.
-app_postgres_password: "{{ vault_postgres_password | default('') }}"
-# Only needed when the image is private. Both come from the vault.
-app_registry: ghcr.io
-app_registry_username: "{{ vault_ghcr_username | default('') }}"
-app_registry_token: "{{ vault_ghcr_token | default('') }}"
+
+# Managed database (Amazon RDS). The host comes from Terraform (inventory or the
+# pipeline); the password is app_db_password from group_vars/all/main.yml.
+app_db_host: "{{ lookup('ansible.builtin.env', 'APP_DB_HOST') | default('', true) }}"
+app_db_port: 5432
+app_db_name: "{{ lookup('ansible.builtin.env', 'APP_DB_NAME') | default('sokoprice', true) }}"
+app_db_user: "{{ lookup('ansible.builtin.env', 'APP_DB_USER') | default('sokoprice', true) }}"
+# "require" encrypts the connection (RDS also enforces TLS on its side).
+app_db_sslmode: require
+
+# CloudWatch Logs: when a log group is set, container logs are shipped there.
+app_log_group: "{{ lookup('ansible.builtin.env', 'APP_LOG_GROUP') | default('', true) }}"
+app_log_region: "{{ lookup('ansible.builtin.env', 'AWS_REGION') | default('', true) }}"
+
+# How long to wait for the new container to report healthy.
 app_health_retries: 20
 app_health_delay: 5

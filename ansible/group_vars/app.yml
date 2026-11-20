@@ -1,0 +1,15 @@
+---
+# The application server is in a private subnet: it has no public address, so
+# Ansible reaches it by jumping through the bastion host. The bastion's address
+# is taken from the inventory, so the same rule works with the static inventory,
+# the pipeline's inventory and the dynamic AWS inventory.
+sokoprice_ssh_key: "{{ lookup('ansible.builtin.env', 'ANSIBLE_PRIVATE_KEY_FILE') | default(ansible_ssh_private_key_file | default('~/.ssh/sokoprice'), true) }}"
+
+sokoprice_bastion_host: "{{ hostvars[groups['bastion'][0]]['ansible_host'] if groups['bastion'] | default([]) | length > 0 else '' }}"
+sokoprice_bastion_user: "{{ ansible_user | default('ubuntu') }}"
+sokoprice_proxy_command: >-
+  ssh -i {{ sokoprice_ssh_key }} -o StrictHostKeyChecking=accept-new
+  -W %h:%p -q {{ sokoprice_bastion_user }}@{{ sokoprice_bastion_host }}
+
+ansible_ssh_common_args: >-
+  {{ ('-o ProxyCommand="' ~ sokoprice_proxy_command ~ '"') if sokoprice_bastion_host | length > 0 else '' }}

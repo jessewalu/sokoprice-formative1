@@ -11,13 +11,13 @@
 # ------------------------------- Firewall ------------------------------------
 - name: Configure the host firewall
   block:
-    - name: Allow SSH (rate limited) from the permitted sources
+    - name: Allow SSH from the permitted sources (rate limited unless security_ssh_rule says otherwise)
       community.general.ufw:
-        rule: limit
+        rule: "{{ security_ssh_rule }}"
         port: "{{ security_ssh_port | string }}"
         proto: tcp
         from_ip: "{{ item }}"
-        comment: "SSH (rate limited)"
+        comment: "SSH"
       loop: "{{ security_ssh_allowed_sources if security_ssh_allowed_sources | length > 0 else ['any'] }}"
 
     - name: Allow the public application ports

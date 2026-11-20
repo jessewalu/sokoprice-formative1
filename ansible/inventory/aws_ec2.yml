@@ -1,7 +1,8 @@
 ---
-# Dynamic inventory: finds the server in AWS by its tags, so no IP address has to
-# be copied around. Use it with:
+# Dynamic inventory: finds the servers in AWS by their tags, so no IP address has
+# to be copied around. Use it with:
 #   export AWS_DEFAULT_REGION=<your region>   # credentials come from your AWS profile
+#   export APP_DB_HOST=<database host>          # terraform output db_endpoint
 #   ansible-inventory -i inventory/aws_ec2.yml --graph
 #   ansible-playbook -i inventory/aws_ec2.yml site.yml --private-key ~/.ssh/sokoprice
 # Requires: pip install boto3 (the amazon.aws collection is included in "ansible").
@@ -9,14 +10,18 @@ plugin: amazon.aws.aws_ec2
 filters:
   tag:Project: sokoprice
   instance-state-name: running
-# Connect to the Elastic IP.
 hostnames:
-  - ip-address
+  - tag:Name
 groups:
-  sokoprice: tags.Project == 'sokoprice'
+  sokoprice: tags.Role == 'app'
 keyed_groups:
+  - key: tags.Role
+    prefix: ""
+    separator: ""
   - key: tags.Environment
     prefix: env
 compose:
+  # The bastion is reached on its public address, the private server on its private one.
+  ansible_host: "public_ip_address if tags.Role == 'bastion' else private_ip_address"
   ansible_user: "'ubuntu'"
   ansible_python_interpreter: "'/usr/bin/python3'"

@@ -1,45 +1,56 @@
 # SokoPrice: Ansible (configuration management)
 
-Terraform [creates the server](../terraform/README.md). This playbook **configures it and deploys the application**: it installs Docker, hardens the firewall and SSH, and runs the SokoPrice container with its PostgreSQL database.
+Terraform [creates the infrastructure](../terraform/README.md). This playbook **configures the servers and deploys the application**: it hardens the bastion host, then, on the **private** application server, installs Docker and Docker Compose, hardens the firewall and SSH, logs in to the private registry (ECR), pulls the image and runs `docker compose up -d`. The database is Amazon RDS, so only the app container runs on the server.
 
-Every task is **idempotent**: run it ten times and the server ends up in the same state; the second run reports `changed=0`.
+The [CD workflow](../.github/workflows/cd.yml) runs this playbook automatically after every merge to `main`. You can also run it by hand (below).
+
+Every task is **idempotent**: run it ten times and the servers end up in the same state; the second run reports `changed=0`.
+
+## How Ansible reaches a private server
+
+The app server has no public address. Ansible connects **through the bastion** with an SSH `ProxyCommand`, defined once in [`group_vars/app.yml`](group_vars/app.yml) from the inventory's `bastion` group. Nothing else is needed on your side except the SSH key.
 
 ## What it does
 
-| Role | What it does |
-|------|--------------|
+| Play / role | What it does |
+|-------------|--------------|
+| Play 1, hosts `bastion` | Roles `common` and `security`: base packages, automatic updates, UFW (SSH only), SSH hardening that still allows forwarding to the private network |
+| Play 2, hosts `sokoprice` (the app server) | Roles below, then verifies the live URL |
 | [`common`](roles/common) | Base packages, time zone, automatic security updates |
 | [`docker`](roles/docker) | Docker Engine and Compose plugin from Docker's official signed repository; daemon config (log rotation, `no-new-privileges`, live restore) |
-| [`security`](roles/security) | UFW firewall (default deny, SSH rate limited, only the API port open); SSH hardening (no root, no passwords, key only, `AllowUsers`, limited retries); fail2ban; kernel network hardening |
-| [`app`](roles/app) | Writes the secrets file (mode 0600) and the Compose file, pulls the image, starts app + database, waits until `/health` answers |
+| [`security`](roles/security) | UFW firewall (default deny, only the app port and SSH open); SSH hardening (no root, no passwords, key only, limited retries); fail2ban; kernel network hardening |
+| [`app`](roles/app) | Writes the secrets file (mode 0600, holds the RDS connection string) and the Compose file, logs in to ECR, pulls the image, runs `docker compose up -d`, waits for `/health`, and **rolls back** to the previous image if the new one is not healthy |
 
-`site.yml` ties them together and finishes by calling `/health` from your computer through the firewall, which proves the deployment works end to end.
+The playbook finishes by calling `/health` and `/api/stats` on the **public URL** (`APP_URL`), which proves load balancer, server and database work together.
 
 ## Files
 
 ```
 ansible/
 ├── ansible.cfg                 # Defaults (inventory, host-key checking, pipelining)
-├── site.yml                    # The playbook
+├── site.yml                    # The playbook (bastion play + app server play)
 ├── requirements.txt            # Python tools (ansible, ansible-lint), pinned
 ├── requirements.yml            # Ansible collections
 ├── .ansible-lint               # Lint profile: production (strictest)
 ├── inventory/
-│   ├── hosts.ini               # Static inventory (generated from Terraform output)
-│   └── aws_ec2.yml             # Dynamic inventory (finds the server by AWS tag)
-├── group_vars/all/
-│   ├── main.yml                # Non-secret settings
-│   └── vault.yml.example       # Template for the encrypted secrets file
+│   ├── production.yml          # Used by the pipeline (addresses from environment variables)
+│   ├── hosts.ini               # Static inventory for manual runs (generated from Terraform)
+│   └── aws_ec2.yml             # Dynamic inventory (finds servers by AWS tag)
+├── group_vars/
+│   ├── all/main.yml            # Settings (image, registry, DB password) read from the environment
+│   ├── all/vault.yml.example   # Template for manual runs (encrypted secrets file)
+│   ├── bastion.yml             # Bastion settings (no public app port, SSH forwarding allowed)
+│   └── app.yml                 # ProxyCommand through the bastion
 └── roles/{common,docker,security,app}/   # tasks, defaults, handlers, templates, meta
 ```
 
 ## Prerequisites
 
-- Python 3.10 or newer on your computer (Linux, macOS, or Windows through WSL).
-- The server from Terraform is running and your SSH key is the one given to Terraform.
-- Your IP is in Terraform's `admin_cidrs` (otherwise the cloud firewall blocks SSH).
+- Python 3.10 or newer (Linux, macOS, or Windows through WSL: **Ansible does not run in Git Bash**).
+- The infrastructure from Terraform is running and you have its SSH key (`~/.ssh/sokoprice`).
+- Your IP is in Terraform's `admin_cidrs` (otherwise the cloud firewall blocks SSH to the bastion).
 
-## Run it
+## Run it by hand
 
 All commands run inside `ansible/`.
 
@@ -53,33 +64,39 @@ ansible-galaxy collection install -r requirements.yml
 
 ### 2. Create the inventory
 
-Option A, **static** (default): copy the ready-made inventory from Terraform.
+Option A, **static**: copy the ready-made inventory from Terraform (run from Git Bash or WSL).
 
 ```bash
-terraform -chdir=../terraform output -raw ansible_inventory > inventory/hosts.ini
+terraform -chdir=../terraform output -raw ansible_inventory | tr -d '\r' > inventory/hosts.ini
 ```
 
-Option B, **dynamic**: no file to maintain; Ansible asks AWS for servers tagged `Project=sokoprice`.
+Option B, **dynamic**: Ansible asks AWS for servers tagged `Project=sokoprice`.
 
 ```bash
 export AWS_REGION=<your region>      # credentials as for Terraform
 ansible-inventory -i inventory/aws_ec2.yml --graph
-ansible-playbook -i inventory/aws_ec2.yml site.yml --private-key ~/.ssh/sokoprice
 ```
 
 ### 3. Create the encrypted secrets file
 
 ```bash
 cp group_vars/all/vault.yml.example group_vars/all/vault.yml
-# edit it: set vault_postgres_password to a long random value
+# set vault_db_password to the RDS password (terraform output -raw db_password_command shows how to read it)
 ansible-vault encrypt group_vars/all/vault.yml
 ```
 
-`vault.yml` is git-ignored. Without a password of at least 12 characters the `app` role stops before changing anything.
+`vault.yml` is git-ignored. Without a valid password the `app` role stops before changing anything. In the pipeline there is no vault file: the password is read from Secrets Manager at run time and masked in the logs.
 
-### 4. Check, then deploy
+### 4. Set the deployment values and deploy
 
 ```bash
+export APP_IMAGE=<ecr repository url>:<tag>      # e.g. 123456789012.dkr.ecr.eu-north-1.amazonaws.com/sokoprice:latest
+export REGISTRY_HOST=<account>.dkr.ecr.<region>.amazonaws.com
+export REGISTRY_USERNAME=AWS
+export REGISTRY_TOKEN="$(aws ecr get-login-password --region <region>)"
+export APP_DB_HOST=<terraform output db_endpoint, without the port>
+export APP_URL=<terraform output app_url>
+
 ansible-playbook site.yml --syntax-check
 ansible-playbook site.yml --private-key ~/.ssh/sokoprice --ask-vault-pass --check --diff   # dry run
 ansible-playbook site.yml --private-key ~/.ssh/sokoprice --ask-vault-pass                  # real run
@@ -87,13 +104,13 @@ ansible-playbook site.yml --private-key ~/.ssh/sokoprice --ask-vault-pass       
 
 ### 5. Prove it is idempotent
 
-Run the real command again. The summary must show `changed=0`.
+Run the real command again. The summary must show `changed=0` (apart from the registry login/logout, which are marked unchanged).
 
 ### 6. Try the API
 
 ```bash
-curl http://<server ip>/health
-curl http://<server ip>/api/prices/maize
+curl "$APP_URL/health"
+curl "$APP_URL/api/prices/maize"
 ```
 
 ### Run only one part
@@ -108,11 +125,11 @@ ansible-playbook site.yml --tags app           # redeploy the app (new image)
 | Area | Setting |
 |------|---------|
 | Firewall | UFW: default deny incoming; SSH rate limited; only the API port open. Second layer behind the AWS security group |
-| SSH | `PermitRootLogin no`, `PasswordAuthentication no`, key only, `AllowUsers`, `MaxAuthTries 3`, no forwarding, verbose logs. Written to a drop-in file and **validated with `sshd -t` before use**, so a typo can never lock you out |
+| SSH | `PermitRootLogin no`, `PasswordAuthentication no`, key only, `AllowUsers`, `MaxAuthTries 3`, TCP forwarding only on the bastion (needed to reach the private server), verbose logs. Written to a drop-in file and **validated with `sshd -t` before use**, so a typo can never lock you out |
 | Brute force | fail2ban bans an address after 4 failed logins |
 | Kernel | Reverse-path filter, no redirects or source routing, SYN cookies, martian logging |
 | Updates | Unattended security updates |
-| Docker | Official signed repository; log rotation; `no-new-privileges`; containers run read-only, with all capabilities dropped; database not published on any port |
+| Docker | Official signed repository; log rotation; `no-new-privileges`; containers run read-only, with all capabilities dropped; the database is managed RDS, reachable only from the app security group |
 | Secrets | Only in the encrypted vault; `.env` on the server is mode 0600; `no_log` hides them from output |
 
 ## Error handling
@@ -134,8 +151,8 @@ ansible-playbook site.yml --syntax-check
 | Problem | Fix |
 |---------|-----|
 | `Permission denied (publickey)` | Pass the right key: `--private-key ~/.ssh/sokoprice` |
-| Connection timeout | Your IP changed: update `admin_cidrs` in Terraform and apply |
+| Connection timeout | Your IP changed: update `admin_cidrs` in Terraform and apply. For the pipeline, check `BASTION_HOST` is current |
 | `Host key verification failed` | The server was recreated: `ssh-keygen -R <ip>` |
-| `Set vault_postgres_password` | Create `group_vars/all/vault.yml` (step 3) |
-| Image pull is denied | The package is private: either make it public in GitHub or add `vault_ghcr_username` and `vault_ghcr_token` (token with `read:packages` only) |
+| `Set vault_db_password` | Create `group_vars/all/vault.yml` (step 3) |
+| Image pull is denied | The ECR token lasts 12 hours: create a new one with `aws ecr get-login-password` and check `REGISTRY_HOST` has no path (host only) |
 | `ERROR! couldn't resolve module` | Run `ansible-galaxy collection install -r requirements.yml` |

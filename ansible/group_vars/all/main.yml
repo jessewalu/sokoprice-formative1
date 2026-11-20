@@ -1,13 +1,21 @@
 ---
-# Settings shared by every role. Nothing secret is stored here: secrets live in
-# the encrypted file group_vars/all/vault.yml (see vault.yml.example).
+# Settings shared by every role. Nothing secret is stored here.
+#
+# Every value can come from an environment variable, which is how the
+# deployment pipeline (GitHub Actions) passes the image to deploy and the
+# credentials it fetched from AWS. For a manual run, either export the same
+# variables or put the secrets in the encrypted file group_vars/all/vault.yml
+# (see vault.yml.example).
 
-# Container image to deploy. publish.yml pushes it to GitHub Container Registry
-# after every merge to main.
-app_image: ghcr.io/jessewalu/sokoprice-formative1:latest
+# Container image to deploy. The pipeline sets APP_IMAGE to the image it just
+# pushed to the private registry (ECR), tagged with the Git commit.
+app_image: "{{ lookup('ansible.builtin.env', 'APP_IMAGE') | default('ghcr.io/jessewalu/sokoprice-formative1:latest', true) }}"
 
-# Public port of the API on the server. Must match Terraform's app_port.
-app_public_port: 80
+# Database password: from the pipeline (read from AWS Secrets Manager), or from the vault.
+app_db_password: "{{ lookup('ansible.builtin.env', 'APP_DB_PASSWORD') | default(vault_db_password | default(''), true) }}"
 
-# Database password comes from the encrypted vault file.
-app_postgres_password: "{{ vault_postgres_password }}"
+# Container registry login. The pipeline passes the ECR login token; a manual
+# run against a private GitHub registry can use the vault values instead.
+app_registry: "{{ lookup('ansible.builtin.env', 'REGISTRY_HOST') | default('ghcr.io', true) }}"
+app_registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') | default(vault_ghcr_username | default(''), true) }}"
+app_registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') | default(vault_ghcr_token | default(''), true) }}"
