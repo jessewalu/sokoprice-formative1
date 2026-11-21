@@ -5,3 +5,4 @@ exclude_paths:
   - .git/
   - .github/
   - inventory/aws_ec2.yml
+  - inventory/production.yml

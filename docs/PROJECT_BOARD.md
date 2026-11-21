@@ -26,7 +26,7 @@ _Last updated for **Formative 2: CI/CD & Containerisation**._ Items 1-8 belong t
 
 ---
 
-## B. Backlog overview (27 items)
+## B. Backlog overview (36 items)
 
 | # | Title | Label(s) | Milestone | Column | Assignee |
 |---|-------|----------|-----------|--------|----------|
@@ -57,6 +57,15 @@ _Last updated for **Formative 2: CI/CD & Containerisation**._ Items 1-8 belong t
 | 25 | Fix Bandit findings in `run.py` and `scripts/healthcheck.py` | `security` | Formative 3 | In Progress | @jessewalu |
 | 26 | Require the new security and IaC checks in branch protection | `security` `devops` | Formative 3 | Backlog | @Kkadi20 |
 | 27 | Collect Formative 3 evidence: Terraform plan, Ansible run, scan results | `devops` `documentation` | Formative 3 | Backlog | @Karabo-jpg |
+| 28 | Terraform: private network, private VM, bastion, RDS, security groups, ECR | `devops` `terraform` | Summative | In Progress | @jessewalu |
+| 29 | Terraform: load balancer, OIDC role, monitoring (logs, alarms, dashboard) | `devops` `terraform` | Summative | In Progress | @jessewalu |
+| 30 | Ansible: bastion play, app play through the bastion, rollback, log shipping | `devops` `ansible` | Summative | In Progress | @Karabo-jpg |
+| 31 | `cd.yml`: CI reuse, Trivy, push to ECR, OIDC, Ansible deploy | `devops` `ci-cd` | Summative | In Progress | @jessewalu |
+| 32 | Update `SECURITY.md` for the new architecture and accepted risks | `security` | Summative | In Progress | @Kkadi20 |
+| 33 | Final README (architecture diagram, live URL, operations manual) and `CHANGELOG.md` | `documentation` | Summative | In Progress | @Karabo-jpg |
+| 34 | One-time GitHub setup: variables, `DEPLOY_SSH_PRIVATE_KEY`, `production` environment, required checks | `devops` `security` | Summative | Backlog | @Kkadi20 |
+| 35 | Deploy to AWS, verify the live URL, capture evidence, then destroy | `devops` `documentation` | Summative | Backlog | @jessewalu |
+| 36 | Record the video demo (F1, F2, Summative walk-through) | `documentation` | Summative | Backlog | @Karabo-jpg |
 
 > Items 6, 7 and 8 were first delivered in Formative 1 and are extended by items 15, 18 and 20. When you maintain the real board, keep the Column values here in sync with it.
 > Item 21 is a **team** task: all three members must contribute reviewed pull requests.
@@ -337,3 +346,12 @@ _Tip: a check only appears in the dropdown after it has run once, so open the pu
 - [ ] `SECURITY.md` with findings, remediation and accepted risks
 - [ ] Required status checks updated in branch protection
 - [ ] Pull requests from all three members, reviewed
+
+**Summative (complete DevOps pipeline)**
+- [ ] `terraform/`: modular, private network, VM in a private subnet, bastion in a public subnet, RDS, security groups, ECR
+- [ ] `ansible/`: playbook installs Docker and Docker Compose and deploys the app
+- [ ] Container scan (Trivy) and IaC scan (Checkov) fail the build on critical findings
+- [ ] `cd.yml` triggers only on merge to `main`, runs the CI checks, pushes to ECR, runs Ansible
+- [ ] Live application reachable on a public URL
+- [ ] README operations manual with architecture diagram and live link; `CHANGELOG.md` covers F1, F2, Summative
+- [ ] Video demo recorded and uploaded

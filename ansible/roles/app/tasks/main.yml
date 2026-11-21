@@ -1,12 +1,16 @@
 ---
-- name: Refuse to deploy without a database password
+- name: Refuse to deploy without the settings the application needs
   ansible.builtin.assert:
     that:
-      - app_postgres_password | length >= 12
-      - app_postgres_password is match('^[A-Za-z0-9._~-]+$')
+      - app_image | length > 0
+      - app_db_host | length > 0
+      - app_db_password | length >= 12
+      - app_db_password is match('^[A-Za-z0-9._~-]+$')
     fail_msg: >-
-      Set vault_postgres_password (at least 12 characters: letters, digits . _ ~ - only) in
-      group_vars/all/vault.yml. See group_vars/all/vault.yml.example.
+      Missing or invalid deployment settings. The image (app_image), the database
+      host (app_db_host) and a database password of at least 12 characters
+      (letters, digits . _ ~ - only) are required. For a manual run set
+      vault_db_password in group_vars/all/vault.yml (see vault.yml.example).
     quiet: true
 
 - name: Create the application directory
@@ -16,6 +20,16 @@
     owner: "{{ app_user }}"
     group: "{{ app_user }}"
     mode: "0750"
+
+- name: Remember which image is running now (used to roll back)
+  ansible.builtin.slurp:
+    src: "{{ app_dir }}/.deployed_image"
+  register: app_previous
+  failed_when: false
+
+- name: Store the previous image name
+  ansible.builtin.set_fact:
+    app_previous_image: "{{ (app_previous.content | b64decode | trim) if app_previous.content is defined else '' }}"
 
 - name: Write the secrets file (readable by the owner only)
   ansible.builtin.template:
@@ -34,7 +48,7 @@
     group: "{{ app_user }}"
     mode: "0640"
 
-- name: Deploy the containers
+- name: Deploy the new image, and go back to the previous one if it does not become healthy
   block:
     - name: Log in to the image registry (only when credentials are provided)
       ansible.builtin.command:
@@ -46,7 +60,7 @@
       changed_when: false
       no_log: true
 
-    - name: Pull the images and start the stack
+    - name: Pull the image and start the container
       community.docker.docker_compose_v2:
         project_src: "{{ app_dir }}"
         pull: always
@@ -65,6 +79,14 @@
       retries: "{{ app_health_retries }}"
       delay: "{{ app_health_delay }}"
       changed_when: false
+
+    - name: Record the image that is now running
+      ansible.builtin.copy:
+        content: "{{ app_image }}\n"
+        dest: "{{ app_dir }}/.deployed_image"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0640"
   rescue:
     - name: Collect recent container logs for the error report
       ansible.builtin.command:
@@ -74,9 +96,46 @@
       changed_when: false
       failed_when: false
 
-    - name: Show the logs and stop
+    - name: Roll back to the previous image
+      when:
+        - app_previous_image | length > 0
+        - app_previous_image != app_image
+      block:
+        - name: Write the Compose file for the previous image
+          ansible.builtin.template:
+            src: docker-compose.yml.j2
+            dest: "{{ app_dir }}/docker-compose.yml"
+            owner: "{{ app_user }}"
+            group: "{{ app_user }}"
+            mode: "0640"
+          vars:
+            app_image: "{{ app_previous_image }}"
+
+        - name: Start the previous image
+          community.docker.docker_compose_v2:
+            project_src: "{{ app_dir }}"
+            pull: missing
+            state: present
+            wait: true
+            wait_timeout: 120
+
+        - name: Report the rollback
+          ansible.builtin.debug:
+            msg: "Rolled back to {{ app_previous_image }}"
+
+    - name: Prepare the rollback note
+      ansible.builtin.set_fact:
+        app_rollback_note: >-
+          {{ 'Rolled back to ' ~ app_previous_image ~ '.'
+          if (app_previous_image | length > 0 and app_previous_image != app_image)
+          else 'There was no previous version to roll back to.' }}
+
+    - name: Stop with the logs, so the pipeline run is marked as failed
       ansible.builtin.fail:
-        msg: "Deployment failed. Last log lines: {{ app_failure_logs.stdout | default('none') }}"
+        msg: >-
+          Deployment of {{ app_image }} failed.
+          {{ app_rollback_note }}
+          Last log lines: {{ app_failure_logs.stdout | default('none') }}
   always:
     - name: Remove registry credentials from the server
       ansible.builtin.command:

@@ -1,0 +1,12 @@
+---
+# The bastion host only forwards SSH to the private network. It serves no web
+# traffic, so no application port is opened on its firewall.
+security_public_tcp_ports: []
+
+# Plain "allow" (not "limit") for SSH: every Ansible connection to the private
+# server opens SSH channels through the bastion, and rate limiting would drop
+# them. The cloud firewall already restricts who can connect.
+security_ssh_rule: allow
+
+# "local" permits the forwarding that ProxyCommand/ProxyJump needs, and nothing else.
+security_ssh_allow_tcp_forwarding: local
