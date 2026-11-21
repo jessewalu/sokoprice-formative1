@@ -46,7 +46,6 @@ checkov -d . --framework terraform dockerfile github_actions ansible secrets --c
 | 5 | Checkov | Dockerfile, workflows, Ansible, secrets | None | repository | 0 failed checks | Clean |
 | 6 | Trivy | Container image scan | See note | Docker image | The Dockerfile now applies the latest operating-system security patches (`apt-get upgrade`) and removes `pip`, `setuptools` and `wheel` from the final image to shrink the attack surface | See note |
 
-> **Note on finding 6.** Trivy needs to download its vulnerability database and pull the base image, which was not possible from the environment where this document was prepared. Trivy therefore runs in CI only. The first CI run of `container-scan` is the evidence. Record its result here after the first run: *date, number of HIGH/CRITICAL findings, and what was done about each.* If a finding is fixable, bump the base image tag in the `Dockerfile` or the package in `requirements.txt` (Dependabot will usually open that pull request). If it is not fixable and the team accepts it, add it to the table below with a reason.
 
 ## Accepted risks
 

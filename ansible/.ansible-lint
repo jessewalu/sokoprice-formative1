@@ -4,5 +4,6 @@ profile: production
 exclude_paths:
   - .git/
   - .github/
+  - .venv/
   - inventory/aws_ec2.yml
   - inventory/production.yml

@@ -3,7 +3,7 @@
 > **Know the market price before you sell.**
 > Crop price tracking for Rwandan smallholder farmers, accessible from any phone via USSD or a simple web API.
 
-[![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.[![CD](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/cd.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/cd.yml)
+[![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml)
 [![Publish image](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml)
 
 > **Live application:** `http://<ALB-DNS-NAME>` &nbsp;·&nbsp; health check: `/health` &nbsp;·&nbsp; example: `/api/prices/maize`
@@ -577,11 +577,78 @@ Then delete the IAM access key used for Terraform. The load balancer, NAT gatewa
 ## 21. License
 known vulnerability |
 | Static code analysis | Bandit | Medium or higher |
-| Container image scan | Trivy | Fixable HIGH or CRITICAL |
-| Infrastructure-as-Code scan | Checkov | Any failed check |
+| **Container image scan** | **Trivy** | **Fixable HIGH or CRITICAL fails the build** (in CI and again in CD before the push) |
+| **Infrastructure-as-Code scan** | **Checkov** (Terraform, Dockerfile, workflows, Ansible, secrets) | **Any failed check fails the build** |
+| IaC quality | `terraform fmt/validate`, `ansible-lint` (production profile) | Any error |
 
-[`SECURITY.md`](SECURITY.md) documents the findings, how each was fixed, and the risks the team accepted with the reason. Dependabot opens weekly update pull requests. Run the scans locally with `pip install -r requirements-security.txt`.
+[`SECURITY.md`](SECURITY.md) documents the findings, how each was fixed, the accepted risks with the reason, and the security controls. Dependabot opens weekly update pull requests. Run the scans locally with `pip install -r requirements-security.txt`.
 
-## 18. License
+## 19. Continuous Deployment (CD)
+
+[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **only when code is merged to `main`**:
+
+| Stage | What happens | Stops the pipeline if |
+|-------|--------------|-----------------------|
+| 1. `ci` | Runs every CI job again: lint, tests, dependency, SAST, container, IaC scans, Terraform and Ansible validation | any check fails |
+| 2. `build-and-push` | Authenticates to AWS with **OIDC** (no stored keys), builds the image, **scans it with Trivy**, pushes it to the private **ECR** registry tagged with the commit SHA | a fixable HIGH/CRITICAL vulnerability is found |
+| 3. `deploy` | Fetches a short-lived registry token and the database password (masked), opens the bastion for the runner's own IP for the duration of the run, runs **Ansible through the bastion**: log in to ECR, pull the new image, `docker compose up -d`, check `/health` on the live URL; then closes the bastion again | the new version is not healthy (it is rolled back and the run fails) |
+
+Safeguards: least-privilege permissions, one deployment at a time (`concurrency`), the AWS role can only be assumed from `main` of this repository, and the temporary SSH rule and key file are removed even when the run fails (`if: always()`).
+
+The older [`publish.yml`](.github/workflows/publish.yml) (public GitHub Container Registry image) is kept as the Formative 2 deliverable; the production deployment uses the private ECR image from `cd.yml`.
+
+## 20. Operations manual
+
+### 20.1 First-time setup (once)
+
+1. Create the infrastructure: `terraform apply` (section 16). Takes 10 to 15 minutes.
+2. Connect GitHub to AWS (the only secret is the SSH key):
+
+```bash
+terraform -chdir=terraform output -raw github_cli_commands | bash
+gh secret set DEPLOY_SSH_PRIVATE_KEY < ~/.ssh/sokoprice
+```
+
+3. In GitHub: **Settings → Environments → New environment** named `production` (optionally require a reviewer), and add the new jobs `lint`, `test`, `container-scan (Trivy)`, `iac-scan` and `iac-validate` to the required checks of the `main` branch protection rule.
+4. Merge a pull request to `main`. The CD workflow builds, pushes and deploys. Open `terraform output app_url`.
+
+### 20.2 Deploy a change
+
+Open a pull request, wait for green checks, get a review, merge. That is all: CD does the rest. The image tag is the commit SHA, so every running version can be traced to a commit.
+
+### 20.3 Roll back
+
+- **Automatic:** if a new version does not become healthy, the playbook restarts the previous image and the run fails.
+- **Manual:** find the last good commit in the **Actions** tab and re-run its `CD` workflow (or revert the commit and merge the revert).
+
+### 20.4 Look at the application
+
+| Need | How |
+|------|-----|
+| Live check | `curl "$(terraform -chdir=terraform output -raw app_url)/health"` |
+| Logs | CloudWatch Logs, group `terraform output app_log_group_name`; or SSH to the server (`terraform output ssh_app_command`) and run `cd /opt/sokoprice && docker compose logs --tail 100` |
+| Metrics and alarms | CloudWatch dashboard `terraform output dashboard_name`; alarms for server CPU, unhealthy targets, 5xx errors, database CPU and storage notify the SNS topic (set `alert_email` to receive them) |
+| Database password | `terraform output -raw db_password_command` shows the command that reads it from Secrets Manager |
+
+### 20.5 Troubleshooting
+
+| Symptom | Likely cause and fix |
+|---------|----------------------|
+| CD fails at `Authenticate to AWS` | Repository variables missing or wrong (`AWS_ROLE_ARN`), or the run is not on `main` |
+| CD fails opening the bastion | `BASTION_SG_ID` wrong, or the role lacks permission: re-run `terraform apply` |
+| Ansible cannot connect | Secret `DEPLOY_SSH_PRIVATE_KEY` is not the private half of the key given to Terraform; `BASTION_HOST` changed after a rebuild (re-run `github_cli_commands`) |
+| Load balancer returns 502/503 | No healthy container yet: check the deploy job, then `docker compose logs` on the server |
+| Trivy fails the build | A fixable HIGH/CRITICAL vulnerability: update the base image or package (Dependabot usually opens that PR) |
+| App starts but `/api/stats` fails | Database unreachable: check `DB_HOST`, the database security group, and that the password in Secrets Manager matches |
+
+### 20.6 Tear down (important: it costs money while running)
+
+```bash
+terraform -chdir=terraform destroy
+```
+
+Then delete the IAM access key used for Terraform. The load balancer, NAT gateway and database are billed by the hour.
+
+## 21. License
 
 Released under the [MIT License](LICENSE).
