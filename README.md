@@ -6,7 +6,7 @@
 [![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml)
 [![Publish image](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml)
 
-> **Live application:** `http://<ALB-DNS-NAME>` &nbsp;·&nbsp; health check: `/health` &nbsp;·&nbsp; example: `/api/prices/maize`
+> **Live application:** `http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com` &nbsp;·&nbsp; health check: `/health` &nbsp;·&nbsp; example: `/api/prices/maize`
 > *(Replace the placeholder with the real address from `terraform output app_url` once the environment is deployed; see [section 20](#20-operations-manual).)*
 >
 > **Project history:** [CHANGELOG.md](CHANGELOG.md) (Formative 1, 2, 3 and the Summative).
