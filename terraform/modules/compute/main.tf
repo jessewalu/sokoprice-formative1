@@ -131,7 +131,9 @@ resource "aws_instance" "bastion" {
   }
 
   lifecycle {
-    ignore_changes = [ami]
+    # The Elastic IP below makes AWS report a public address on this server,
+    # which would otherwise look like a change that forces a rebuild.
+    ignore_changes = [ami, associate_public_ip_address]
   }
 }
 
