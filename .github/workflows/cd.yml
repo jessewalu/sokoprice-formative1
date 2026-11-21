@@ -1,0 +1,196 @@
+# =============================================================================
+# CD pipeline - runs ONLY when code is merged (pushed) to main.
+#
+#   1. ci            all CI checks again: lint, tests, security scans, IaC scans
+#   2. build-and-push  build the image, scan it with Trivy (fails on fixable
+#                      HIGH/CRITICAL), then push it to the private Amazon ECR
+#                      repository created by Terraform. Tag = the commit SHA.
+#   3. deploy        authenticate to AWS (OIDC, no stored keys), open the bastion
+#                    for this runner only, run Ansible through the bastion to
+#                    pull the new image on the private server and run
+#                    "docker compose up -d", check the live URL, then close the
+#                    bastion again.
+#
+# One-time setup (values come from "terraform output"): see README, section
+# "Operations manual". Repository VARIABLES: AWS_REGION, AWS_ROLE_ARN,
+# ECR_REPOSITORY_URL, BASTION_SG_ID, BASTION_HOST, APP_PRIVATE_IP, APP_URL,
+# DB_HOST, DB_NAME, DB_USER, DB_SECRET_ARN, APP_LOG_GROUP.
+# Repository SECRET: DEPLOY_SSH_PRIVATE_KEY (private half of the key pair).
+# =============================================================================
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Never run two deployments at the same time, and never cancel one half-way.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. The same checks as CI. If any of them fails, nothing is deployed.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: ci
+    uses: ./.github/workflows/ci.yml
+
+  # ---------------------------------------------------------------------------
+  # 2. Build, scan and push the image to the private registry (ECR)
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: build-and-push (ECR)
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write # lets the job ask AWS for short-lived credentials (OIDC)
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to AWS (OIDC, no long-lived keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to the private registry (Amazon ECR)
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Work out the image name (tag = commit SHA)
+        id: meta
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+        run: echo "image=${ECR_REPOSITORY_URL}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image (not pushed yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan the image with Trivy (fails on fixable HIGH or CRITICAL)
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: >-
+          docker run --rm
+          -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.58.1 image
+          --severity HIGH,CRITICAL
+          --ignore-unfixed
+          --exit-code 1
+          --no-progress
+          "$IMAGE"
+
+      - name: Push the scanned image to ECR
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: docker push "$IMAGE"
+
+  # ---------------------------------------------------------------------------
+  # 3. Deploy with Ansible through the bastion host
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy (Ansible)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      BASTION_SG_ID: ${{ vars.BASTION_SG_ID }}
+      ANSIBLE_FORCE_COLOR: "1"
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to AWS (OIDC, no long-lived keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Get a short-lived registry token and the database password
+        env:
+          DB_SECRET_ARN: ${{ vars.DB_SECRET_ARN }}
+        run: |
+          REGISTRY_TOKEN="$(aws ecr get-login-password --region "$AWS_REGION")"
+          DB_PASSWORD="$(aws secretsmanager get-secret-value \
+            --secret-id "$DB_SECRET_ARN" --query SecretString --output text \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')"
+          echo "::add-mask::$REGISTRY_TOKEN"
+          echo "::add-mask::$DB_PASSWORD"
+          {
+            echo "REGISTRY_TOKEN=$REGISTRY_TOKEN"
+            echo "APP_DB_PASSWORD=$DB_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Ansible and its collections
+        run: |
+          python3 -m pip install --quiet "ansible-core>=2.16,<2.19"
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Write the SSH key (removed again at the end)
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 0600 /dev/null "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy_key"
+
+      - name: Open the bastion for this runner only (temporary /32 rule)
+        run: |
+          RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$BASTION_SG_ID" --protocol tcp --port 22 \
+            --cidr "${RUNNER_IP}/32"
+
+      - name: Deploy with Ansible (pull the new image and docker compose up -d)
+        working-directory: ansible
+        env:
+          APP_IMAGE: ${{ needs.build-and-push.outputs.image }}
+          REGISTRY_HOST: ${{ vars.ECR_REPOSITORY_URL }}
+          REGISTRY_USERNAME: AWS
+          BASTION_HOST: ${{ vars.BASTION_HOST }}
+          APP_PRIVATE_IP: ${{ vars.APP_PRIVATE_IP }}
+          APP_URL: ${{ vars.APP_URL }}
+          APP_DB_HOST: ${{ vars.DB_HOST }}
+          APP_DB_NAME: ${{ vars.DB_NAME }}
+          APP_DB_USER: ${{ vars.DB_USER }}
+          APP_LOG_GROUP: ${{ vars.APP_LOG_GROUP }}
+        run: |
+          export REGISTRY_HOST="${REGISTRY_HOST%%/*}"
+          export ANSIBLE_PRIVATE_KEY_FILE="$RUNNER_TEMP/deploy_key"
+          ansible-playbook -i inventory/production.yml site.yml
+
+      - name: Close the bastion and remove the SSH key
+        if: always()
+        run: |
+          if [ -n "${RUNNER_IP:-}" ]; then
+            aws ec2 revoke-security-group-ingress \
+              --group-id "$BASTION_SG_ID" --protocol tcp --port 22 \
+              --cidr "${RUNNER_IP}/32" || true
+          fi
+          rm -f "$RUNNER_TEMP/deploy_key"
