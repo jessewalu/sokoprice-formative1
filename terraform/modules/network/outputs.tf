@@ -22,3 +22,13 @@ output "flow_log_group_name" {
   description = "Name of the CloudWatch log group that stores the flow logs (null when flow logs are disabled)."
   value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : null
 }
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets, in the order of private_subnet_cidrs."
+  value       = aws_subnet.private[*].id
+}
+
+output "nat_gateway_public_ip" {
+  description = "Public IP address that all outbound traffic from the private subnets uses."
+  value       = aws_eip.nat.public_ip
+}

@@ -18,6 +18,11 @@ variable "public_subnet_cidrs" {
   type        = list(string)
 }
 
+variable "private_subnet_cidrs" {
+  description = "IPv4 CIDR blocks of the private subnets, one per availability zone. The application server runs in the first one; the database needs at least two."
+  type        = list(string)
+}
+
 variable "enable_flow_logs" {
   description = "Create the encrypted CloudWatch log group, IAM role and VPC flow log."
   type        = bool

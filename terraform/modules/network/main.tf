@@ -1,5 +1,12 @@
 # -----------------------------------------------------------------------------
-# Network module: VPC, public subnets, internet gateway, routing and flow logs.
+# Network module: VPC, public and private subnets, internet gateway, NAT
+# gateway, routing and flow logs.
+#
+#   Public subnets  : load balancer and bastion host (internet gateway route).
+#   Private subnets : application server and database. No inbound path from the
+#                     internet; outbound traffic leaves through the NAT gateway
+#                     (package and image downloads) and nothing can start a
+#                     connection back in.
 # -----------------------------------------------------------------------------
 
 data "aws_availability_zones" "available" {
@@ -75,6 +82,65 @@ resource "aws_route_table_association" "public" {
 
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
+}
+
+# ------------------------- Private subnets and NAT ---------------------------
+
+resource "aws_subnet" "private" {
+  count = length(var.private_subnet_cidrs)
+
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = var.private_subnet_cidrs[count.index]
+  availability_zone       = element(data.aws_availability_zones.available.names, count.index)
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${var.name_prefix}-private-${count.index + 1}"
+    Tier = "private"
+  }
+}
+
+# One NAT gateway (in the first public subnet) keeps cost down. For production
+# availability use one per availability zone.
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${var.name_prefix}-nat-eip"
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = {
+    Name = "${var.name_prefix}-nat"
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.this.id
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-private-rt"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  count = length(var.private_subnet_cidrs)
+
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private.id
 }
 
 # ------------------------------ Flow logs ------------------------------------

@@ -1,18 +1,23 @@
 # Development environment. Use with:
 #   terraform plan -var-file=environments/dev.tfvars
 # (copy this file to environments/dev.tfvars first; it is git-ignored)
+#
+# Cheapest settings: small instances, a single-zone database, short backups, and
+# everything can be removed again with `terraform destroy`.
 
-aws_region  = "eu-west-1"
+aws_region  = "eu-north-1"
 environment = "dev"
-
-vpc_cidr            = "10.20.0.0/16"
-public_subnet_cidrs = ["10.20.1.0/24", "10.20.2.0/24"]
 
 admin_cidrs    = ["203.0.113.25/32"]
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE sokoprice"
 
-# Cheapest settings for development.
-instance_type              = "t3.micro"
-root_volume_size           = 20
-enable_detailed_monitoring = false
-flow_log_retention_days    = 30
+instance_type         = "t3.micro"
+bastion_instance_type = "t3.micro"
+db_instance_class     = "db.t3.micro"
+
+db_multi_az              = false
+db_backup_retention_days = 1
+db_deletion_protection   = false
+db_skip_final_snapshot   = true
+flow_log_retention_days  = 30
+log_retention_days       = 30

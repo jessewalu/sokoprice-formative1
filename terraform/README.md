@@ -1,256 +1,182 @@
 # SokoPrice: Terraform (Infrastructure as Code)
 
-This directory describes the cloud infrastructure that SokoPrice runs on, as code. One command builds it, one command removes it, and every change is reviewed in a pull request like any other code.
+This directory describes the whole cloud environment SokoPrice runs in, as code. One command builds it, one command removes it, and every change is reviewed in a pull request like any other code.
 
-Terraform **creates the server**. [Ansible](../ansible/README.md) then **configures it and deploys the application** onto it.
+Terraform **creates the infrastructure**. [Ansible](../ansible/README.md) **configures the server and deploys the app** onto it, and the [CD workflow](../.github/workflows/cd.yml) runs Ansible automatically on every merge to `main`.
 
 ## What it builds
 
 ```
-                          Internet
-                              │
-                     ┌────────▼────────┐
-                     │ Internet gateway│
-                     └────────┬────────┘
-   ┌──────────────────────────┼──────────────────────────────┐
-   │ VPC  (10.20.0.0/16)      │                              │
-   │   ┌──────────────────────▼─────────┐  ┌───────────────┐ │
-   │   │ Public subnet 1 (AZ a)         │  │ Public subnet │ │
-   │   │  ┌──────────────────────────┐  │  │ 2 (AZ b)      │ │
-   │   │  │ EC2 instance (Ubuntu LTS)│  │  │ (spare, for a │ │
-   │   │  │  • Elastic IP            │  │  │ future load   │ │
-   │   │  │  • encrypted disk, IMDSv2│  │  │ balancer)     │ │
-   │   │  │  • IAM role (SSM only)   │  │  └───────────────┘ │
-   │   │  └────────────▲─────────────┘  │                    │
-   │   └───────────────┼────────────────┘                    │
-   │        Security group (firewall)                        │
-   │   in:  SSH from admin IPs only, API port               │
-   │   out: HTTPS, HTTP, DNS to the VPC resolver only       │
-   │                                                         │
-   │   Flow logs ──► encrypted CloudWatch log group (KMS)   │
-   └─────────────────────────────────────────────────────────┘
+                                 Internet
+                                    │
+                         ┌──────────▼──────────┐
+                         │   Internet gateway   │
+                         └───┬──────────────┬───┘
+ ┌───────────────────────────┼──────────────┼────────────────────────────┐
+ │ VPC 10.20.0.0/16          │              │                            │
+ │  ┌────────────────────────▼──────────────▼───────────────────────┐    │
+ │  │ PUBLIC subnets (2 availability zones)                         │    │
+ │  │   Application Load Balancer ◄── port 80/443 from the internet │    │
+ │  │   Bastion host (SSH jump box, Elastic IP, admin IPs only)     │    │
+ │  │   NAT gateway (outbound-only internet for the private subnets)│    │
+ │  └───────────────┬─────────────────────────────┬─────────────────┘    │
+ │       app port   │                    SSH      │                      │
+ │  ┌───────────────▼─────────────────────────────▼─────────────────┐    │
+ │  │ PRIVATE subnets (no public IPs, no inbound route from outside)│    │
+ │  │   App server (EC2, Docker + Compose, set up by Ansible)       │    │
+ │  │        │ PostgreSQL 5432, TLS                                 │    │
+ │  │   Managed database (Amazon RDS PostgreSQL, encrypted)         │    │
+ │  └───────────────────────────────────────────────────────────────┘    │
+ └───────────────────────────────────────────────────────────────────────┘
+  Outside the VPC:  ECR (private image registry) · Secrets Manager (DB password)
+                    CloudWatch (logs, alarms, dashboard) · SNS (alerts)
+                    IAM role for GitHub Actions (OIDC, no stored keys)
 ```
+
+Traffic path for a user: **internet → load balancer → app server (private) → database (private)**. The only way an administrator reaches the private server is **through the bastion**.
 
 | Module | Resources |
 |--------|-----------|
-| [`modules/network`](modules/network) | VPC, locked-down default security group, internet gateway, public subnets, route table and associations, VPC flow logs with a KMS key, log group and IAM role |
-| [`modules/security`](modules/security) | Security group with one rule resource per rule (SSH from admin addresses, API port, restricted outbound) |
-| [`modules/compute`](modules/compute) | Ubuntu 24.04 LTS EC2 instance, key pair, IAM role and instance profile (SSM), Elastic IP |
+| [`modules/network`](modules/network) | VPC, locked-down default security group, internet gateway, public and private subnets, NAT gateway, route tables, VPC flow logs (KMS-encrypted) |
+| [`modules/security`](modules/security) | Four security groups (load balancer, bastion, app, database) chained together: each rule's source is another group, never a wide CIDR, except the public web port and admin SSH |
+| [`modules/compute`](modules/compute) | Bastion host (public subnet) and application server (**private** subnet), key pair, IAM roles (SSM, CloudWatch Logs), Elastic IP for the bastion |
+| [`modules/database`](modules/database) | Amazon RDS PostgreSQL in the private subnets: encrypted, TLS enforced, backups, generated password stored in Secrets Manager (customer-managed KMS key) |
+| [`modules/registry`](modules/registry) | Private ECR repository: scan on push, immutable tags, KMS encryption, lifecycle policy |
+| [`modules/loadbalancer`](modules/loadbalancer) | Application Load Balancer, target group with health check, HTTP listener (HTTPS and redirect when `certificate_arn` is set) |
+| [`modules/cicd`](modules/cicd) | GitHub OIDC provider and a least-privilege role that only `main` of this repository can assume |
+| [`modules/monitoring`](modules/monitoring) | Encrypted CloudWatch log group, alarms (CPU, unhealthy targets, 5xx, DB CPU/storage), dashboard, SNS topic |
 
-Required components of the assignment: **VPC** (`aws_vpc`), **compute instance** (`aws_instance`), **network security rules** (`aws_security_group` and `aws_vpc_security_group_*_rule`).
+Required components of the assignment and where they are: **VPC** `modules/network`, **VM in a private subnet** `modules/compute`, **bastion in a public subnet** `modules/compute`, **managed database** `modules/database`, **security groups** `modules/security`, **private container registry** `modules/registry`.
 
 ## Files
 
-```
-terraform/
-├── versions.tf                     # Terraform + provider version constraints, provider config
-├── main.tf                         # Root module: wires the three modules together
-├── variables.tf                    # All inputs, with descriptions, types and validation
-├── outputs.tf                      # IDs, IP addresses, SSH command, ready-made Ansible inventory
-├── terraform.tfvars.example        # Copy to terraform.tfvars and edit
-├── backend.tf.example              # Optional remote state (S3 + locking)
-├── environments/
-│   ├── dev.tfvars.example          # Cheap development settings
-│   └── prod.tfvars.example         # Production settings (separate CIDR range, monitoring on)
-└── modules/
-    ├── network/   (main.tf, variables.tf, outputs.tf)
-    ├── security/  (main.tf, variables.tf, outputs.tf)
-    └── compute/   (main.tf, variables.tf, outputs.tf)
-```
+| File | Purpose |
+|------|---------|
+| `versions.tf` | Terraform and provider version constraints |
+| `main.tf` | Calls every module and wires their outputs and inputs together |
+| `variables.tf` | Every input, with type, description, default (where safe) and validation |
+| `outputs.tf` | Live URL, IPs, registry URL, database endpoint, GitHub variables, Ansible inventory |
+| `terraform.tfvars.example` | Template for your own values (copy to `terraform.tfvars`, never commit it) |
+| `environments/dev.tfvars.example`, `prod.tfvars.example` | Cheap lab settings and production settings (Multi-AZ, deletion protection, 7-day backups, 1-minute metrics) |
+| `backend.tf.example` | Optional remote state in S3 with locking |
+| `modules/*` | The eight modules above (`main.tf`, `variables.tf`, `outputs.tf` each) |
 
 ## Prerequisites
 
-| Tool | Version | Check |
-|------|---------|-------|
-| [Terraform](https://developer.hashicorp.com/terraform/install) (or OpenTofu) | 1.5 or newer | `terraform version` |
-| An AWS account and a user or role that may create VPC, EC2, IAM, KMS and CloudWatch resources | | `aws sts get-caller-identity` |
-| An SSH key pair | | see step 1 |
-
-**Credentials are never written in code.** Configure them on your own computer with `aws configure` (or `aws configure sso`), or the environment variables `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and optionally `AWS_SESSION_TOKEN`. The provider picks them up automatically. Do not put them in `.tf` or `.tfvars` files, and never commit them.
-
-## How to initialise and apply
-
-All commands run inside the `terraform/` directory.
-
-### 1. Create an SSH key (once)
+- Terraform 1.9 or newer, AWS CLI, an AWS account and an IAM user with an access key (`aws configure`).
+- An SSH key pair. Create one once (Git Bash):
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/sokoprice -C "sokoprice"
-cat ~/.ssh/sokoprice.pub        # this PUBLIC text goes into the tfvars file
+ssh-keygen -t ed25519 -f ~/.ssh/sokoprice -C "sokoprice" -N ""
 ```
 
-Keep `~/.ssh/sokoprice` (the private key) on your computer only.
-
-### 2. Create your variable file
+## How to initialise and apply
 
 ```bash
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars`:
-
-- `aws_region`: the region to use.
-- `admin_cidrs`: **your public IP with `/32`**. Find it with `curl https://checkip.amazonaws.com`. `0.0.0.0/0` is rejected on purpose: SSH must not be open to the world.
-- `ssh_public_key`: the text printed by the `cat` command above.
-
-`terraform.tfvars` is git-ignored.
-
-### 3. Initialise
+Edit `terraform.tfvars`: set `admin_cidrs` to **your public IP followed by /32** (find it with `curl -s https://checkip.amazonaws.com`) and `ssh_public_key` to the contents of `~/.ssh/sokoprice.pub`. Never use `0.0.0.0/0` for SSH; validation rejects it.
 
 ```bash
 terraform init
-```
-
-Downloads the AWS provider and sets up the modules. Commit the generated `.terraform.lock.hcl` file so everyone uses the same provider version. Never commit the `.terraform/` folder.
-
-### 4. Check the code (no AWS account needed)
-
-```bash
-terraform fmt -recursive -check   # formatting
-terraform validate                # syntax and internal consistency
-```
-
-These two commands also run in CI on every pull request.
-
-### 5. Preview
-
-```bash
+terraform fmt -check -recursive
+terraform validate
 terraform plan -out=tfplan
-```
-
-Read the plan. It should show about 28 resources to add and nothing to change or destroy on a first run.
-
-### 6. Apply
-
-```bash
 terraform apply tfplan
 ```
 
-Takes about two minutes. When finished, Terraform prints the outputs.
-
-### 7. Read the outputs
+The first apply takes about 10 to 15 minutes (the database is the slow part). Then read the outputs:
 
 ```bash
-terraform output                          # everything
-terraform output instance_public_ip       # one value
-terraform output -raw ssh_command         # ssh -p 22 ubuntu@<ip>
+terraform output app_url                 # the live URL (load balancer)
+terraform output ssh_bastion_command     # how to log in to the bastion
+terraform output ssh_app_command         # how to reach the private server through it
+terraform output -raw db_password_command   # how to read the database password
 ```
 
-| Output | Meaning |
-|--------|---------|
-| `vpc_id` | ID of the VPC |
-| `public_subnet_ids` | IDs of the public subnets |
-| `security_group_id` | ID of the firewall group |
-| `instance_id` | ID of the EC2 instance |
-| `instance_public_ip` | Elastic IP of the server |
-| `instance_private_ip` | Address inside the VPC |
-| `app_url` | `http://<ip>:<port>` once the app is deployed |
-| `ssh_command` | Ready-to-use SSH command (add `-i ~/.ssh/sokoprice`) |
-| `ansible_inventory` | A complete Ansible inventory for this server |
-
-### 8. Hand over to Ansible
+### Connect the pipeline (once)
 
 ```bash
-terraform output -raw ansible_inventory > ../ansible/inventory/hosts.ini
-cd ../ansible
-ansible-playbook site.yml --private-key ~/.ssh/sokoprice
+terraform output -raw github_cli_commands | bash     # sets the 12 repository variables
+gh secret set DEPLOY_SSH_PRIVATE_KEY < ~/.ssh/sokoprice   # the only secret
 ```
 
-See [`ansible/README.md`](../ansible/README.md).
+Variables set: `AWS_REGION`, `AWS_ROLE_ARN`, `ECR_REPOSITORY_URL`, `BASTION_HOST`, `BASTION_SG_ID`, `APP_PRIVATE_IP`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_SECRET_ARN`, `APP_URL`, `APP_LOG_GROUP`. They are not secrets (addresses and names). The AWS credentials are **never stored**: the workflow gets short-lived credentials through OIDC.
 
-### 9. Remove everything when you are finished
+### First deployment by hand (optional)
+
+```bash
+terraform output -raw ansible_inventory | tr -d '\r' > ../ansible/inventory/hosts.ini
+```
+
+Then follow [`ansible/README.md`](../ansible/README.md). Normally you skip this: merge a pull request to `main` and the CD pipeline does it.
+
+### Remove everything when you are finished
 
 ```bash
 terraform destroy
 ```
 
-Always destroy lab infrastructure when you stop working on it. Anything left running keeps costing money (the instance, the Elastic IP, the log storage).
+The registry is created with `ecr_force_delete = true` and the database with `db_skip_final_snapshot = true` and no deletion protection in the dev settings, so a destroy leaves nothing behind. In production settings both are protected. Afterwards delete the IAM access key you used.
 
 ## Environments
 
-Environment-specific values never live in the code. Use one variable file per environment:
+| Setting | dev (lab) | prod |
+|---------|-----------|------|
+| Database Multi-AZ | off | on |
+| Database deletion protection and final snapshot | off | on |
+| Backup retention | 1 day | 7 days |
+| Detailed (1-minute) monitoring | off | on |
+| ALB deletion protection | off | on |
+| HTTPS (`certificate_arn`) | optional | required |
 
-```bash
-cp environments/dev.tfvars.example  environments/dev.tfvars
-cp environments/prod.tfvars.example environments/prod.tfvars
+Use `terraform plan -var-file=environments/prod.tfvars` (after copying the example to a real file).
 
-terraform plan -var-file=environments/dev.tfvars
-terraform plan -var-file=environments/prod.tfvars
-```
+## Variables (summary)
 
-Use a separate state for each environment (separate backend `key`, or Terraform workspaces) so that `dev` and `prod` never share state.
+The complete list, with validation rules, is in [`variables.tf`](variables.tf).
 
-## Variables
+| Group | Variables |
+|-------|-----------|
+| General | `aws_region`, `project_name`, `environment`, `extra_tags` |
+| Network | `vpc_cidr`, `public_subnet_cidrs` (at least 2), `private_subnet_cidrs`, `enable_flow_logs`, `flow_log_retention_days` |
+| Access | `admin_cidrs`, `ssh_port`, `app_port`, `alb_allowed_cidrs`, `certificate_arn`, `ssh_public_key` |
+| Compute | `bastion_instance_type`, `instance_type`, `root_volume_size`, `ami_owner_id`, `ami_name_pattern`, `enable_detailed_monitoring` |
+| Database | `db_name`, `db_username`, `db_engine_version`, `db_parameter_group_family`, `db_instance_class`, `db_allocated_storage`, `db_multi_az`, `db_backup_retention_days`, `db_deletion_protection`, `db_skip_final_snapshot`, `db_secret_recovery_window_days` |
+| Registry and ALB | `ecr_force_delete`, `health_check_path`, `alb_deletion_protection` |
+| Pipeline and operations | `github_repository`, `github_branch`, `create_github_oidc_provider`, `alert_email`, `log_retention_days` |
 
-Defined in [`variables.tf`](variables.tf). Variables with no default are **required**.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `aws_region` | *required* | Region to deploy into (no region is hard-coded anywhere) |
-| `admin_cidrs` | *required* | IPs allowed to use SSH. Validation rejects an empty list and `0.0.0.0/0` |
-| `ssh_public_key` | *required* | Public SSH key for the server. Validation checks the format |
-| `project_name` | `sokoprice` | Used in names and tags |
-| `environment` | `dev` | `dev`, `staging` or `prod` |
-| `vpc_cidr` | `10.20.0.0/16` | VPC address range |
-| `public_subnet_cidrs` | two `/24` ranges | One public subnet per availability zone |
-| `ssh_port` | `22` | SSH port (must match Ansible `security_ssh_port`) |
-| `app_port` | `80` | Public port of the API |
-| `app_allowed_cidrs` | `["0.0.0.0/0"]` | Who may reach the API (public by design) |
-| `instance_type` | `t3.micro` | EC2 size |
-| `root_volume_size` | `20` | Encrypted disk size in GiB |
-| `enable_flow_logs` | `true` | VPC flow logs to an encrypted log group |
-| `flow_log_retention_days` | `365` | Log retention (allowed CloudWatch values only) |
-| `enable_detailed_monitoring` | `false` | 1-minute EC2 metrics (extra cost) |
-| `ami_owner_id` / `ami_name_pattern` | Canonical / Ubuntu 24.04 | Which image to use (publisher is pinned) |
-| `extra_tags` | `{}` | Extra tags on every resource |
-
-There are **no secrets** in this configuration. The only key-related value is the *public* SSH key.
+No secret is a variable with a default: the database password is generated by Terraform (`random_password`) and stored in Secrets Manager; it never appears in the repository.
 
 ## Security design
 
-- **Least-privilege firewall:** SSH only from `admin_cidrs`; outbound traffic limited to HTTPS, HTTP and DNS to the VPC resolver.
-- **No open SSH:** validation refuses `0.0.0.0/0` for administrators.
-- **Encrypted everything:** encrypted root volume; flow logs encrypted with a customer-managed KMS key with rotation enabled.
-- **IMDSv2 required** with hop limit 1: stops server-side request forgery from stealing instance credentials, and containers cannot reach the metadata service.
-- **Default security group locked down** so nothing can use it by accident.
-- **Pinned image publisher** (Canonical) so a look-alike image cannot be chosen.
-- **IAM role limited to Systems Manager**, so the server can also be reached with Session Manager without opening any port.
-- **Elastic IP instead of auto-assigned public IP**, so the address is stable.
-- **Provider version range** is pinned in `versions.tf`; commit `.terraform.lock.hcl`.
-- **State files** can contain sensitive values and are git-ignored (`*.tfstate`). A team should use remote state: see [`backend.tf.example`](backend.tf.example).
+- **Private by default:** the application server and the database have no public IP and sit in subnets with no route from the internet. Only the load balancer and the bastion are public.
+- **Chained security groups:** internet → ALB (80/443) → app (app port, source = ALB group) → database (5432, source = app group). SSH to the app comes only from the bastion group; SSH to the bastion only from `admin_cidrs` (and, during a deployment, the runner's own /32, removed afterwards).
+- **Encryption:** encrypted disks, RDS storage encrypted with a customer-managed key, TLS enforced by the database parameter group (`rds.force_ssl=1`), encrypted registry and logs.
+- **Secrets:** generated database password in Secrets Manager; GitHub uses OIDC with a role limited to `main` and to the one registry, one secret and one security group it needs.
+- **Metadata and access:** IMDSv2 required; administration through SSH keys and SSM, no password logins.
+- **Least privilege and provenance:** every resource is tagged (`default_tags`), providers are pinned, inputs are validated.
 
-Every Checkov skip in the code carries a written reason, and all of them are explained in [`SECURITY.md`](../SECURITY.md).
+Scan result: **Checkov 285 passed, 0 failed**. The 31 skipped checks are each an inline `#checkov:skip=ID:reason` comment, and the real accepted risks are listed in [`SECURITY.md`](../SECURITY.md).
 
 ## Scanning and validation in CI
 
-Pull requests run these checks automatically (see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)):
-
-| Check | Tool | Purpose |
-|-------|------|---------|
-| Formatting | `terraform fmt -check -recursive` | Consistent style |
-| Validation | `terraform init -backend=false` and `terraform validate` | Valid syntax and references |
-| Security scan | Checkov | Misconfigurations (open ports, missing encryption, and so on) |
-
-Run the same locally:
-
-```bash
-terraform fmt -recursive -check && terraform validate
-pip install checkov && checkov -d . --framework terraform --compact --quiet --skip-download
-```
+The `iac-validate` job runs `terraform fmt -check`, `terraform init -backend=false` and `terraform validate`; the `iac-scan` job runs Checkov on `terraform/`. Both must pass before a merge, and `cd.yml` runs them again before it deploys.
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| `No valid credential sources found` | Run `aws configure` or export the AWS environment variables |
-| `admin_cidrs must not be 0.0.0.0/0` | Use your own address with `/32` |
-| `InvalidKeyPair.Format` or key validation error | `ssh_public_key` must be the **public** key (the `.pub` file), starting with `ssh-ed25519` or `ssh-rsa` |
-| `UnauthorizedOperation` for an instance type | The type is not available to your account or region; set `instance_type` to another |
-| Region not enabled | Opt-in regions (for example `af-south-1`) must be enabled in the AWS account settings first |
-| `terraform fmt -check` fails in CI | Run `terraform fmt -recursive` locally and commit the result |
-| Can no longer SSH after my IP changed | Update `admin_cidrs` and run `terraform apply` |
+| Symptom | Cause and fix |
+|---------|---------------|
+| `Error: Invalid CIDR` or validation failure on `admin_cidrs` | Use `x.x.x.x/32`; `0.0.0.0/0` is rejected on purpose |
+| `RDS ... backup retention period` error | Some AWS free-plan accounts limit backups to 1 day: keep `db_backup_retention_days = 1` |
+| `OpenIDConnect provider already exists` | Another stack in the account owns it: set `create_github_oidc_provider = false` |
+| `EntityAlreadyExists` for roles or groups from an earlier run | An earlier stack is still deployed: run `terraform destroy` there first |
+| Target group shows **unhealthy** after apply | Expected until the first deployment: no container runs yet. Merge to `main` (or run Ansible by hand) |
+| `ssh` to the private server times out | Use `terraform output ssh_app_command` (it jumps through the bastion); check `admin_cidrs` is your **current** IP |
+| `Error acquiring the state lock` | A previous run was interrupted: wait, or `terraform force-unlock <ID>` |
 
 ## Cost note
 
-A `t3.micro` instance may be covered by the AWS free tier for new accounts (check the current terms). The Elastic IP, encrypted volume, KMS key and log storage are small but not free. Run `terraform destroy` when you are not using the environment.
+The lab environment is not free: the **NAT gateway**, the **load balancer** and the **database** are billed by the hour (roughly 3 to 4 US dollars per day together at the time of writing, check the AWS pricing pages). Apply it for the demo and run `terraform destroy` straight after.
