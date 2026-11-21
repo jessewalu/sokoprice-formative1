@@ -10,7 +10,7 @@ All notable changes to SokoPrice, by assignment stage. The format follows [Keep 
 - **Ansible:** play for the bastion and play for the private app server (reached through the bastion with a `ProxyCommand`); roles `common`, `docker` (Docker Engine and Compose), `security`, `app`; registry login, `docker compose up -d`, health verification through the public URL, **automatic rollback** to the previous image, container logs shipped to CloudWatch; pipeline inventory `inventory/production.yml`.
 - **`cd.yml`:** continuous deployment on merge to `main`: reuses every CI job, builds the image, scans it with Trivy, pushes it to ECR, authenticates to AWS with OIDC and runs Ansible through the bastion; one deployment at a time; temporary SSH rule and key removed even on failure.
 - **CI:** `workflow_call` trigger so CD runs the same checks.
-- `CHANGELOG.md`, operations manual and architecture diagram in the README, `docs/SUMMATIVE_GUIDE.md` (evidence checklist and demo-video plan).
+- `CHANGELOG.md`, operations manual and architecture diagram in the README.
 
 ### Changed
 - The database moved from a container on the server to managed RDS; the server runs the app container only.
