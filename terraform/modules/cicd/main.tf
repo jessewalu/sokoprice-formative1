@@ -19,6 +19,19 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_name  = split("/", var.github_repository)[1]
+
+  # GitHub can send the repository either by name or, for repositories that use
+  # the newer "immutable subject", as owner@id/repo@id. The * stands for the
+  # numeric id only: the owner and the repository name are always fixed.
+  trusted_subjects = [
+    "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}",
+    "repo:${var.github_repository}:environment:production",
+    "repo:${local.github_owner}@*/${local.github_name}@*:ref:refs/heads/${var.github_branch}",
+    "repo:${local.github_owner}@*/${local.github_name}@*:environment:production",
+  ]
+
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   bastion_sg_arn    = "arn:${data.aws_partition.current.partition}:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-group/${var.bastion_security_group_id}"
 }
@@ -60,11 +73,12 @@ data "aws_iam_policy_document" "trust" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Only workflows of this repository, running on this branch.
+    # Only workflows of this repository: runs on the deployment branch, and the
+    # deploy job, which uses the "production" environment.
     condition {
-      test     = "StringEquals"
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"]
+      values   = local.trusted_subjects
     }
   }
 }
