@@ -58,7 +58,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Authenticate to AWS (OIDC, no long-lived keys)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -127,7 +127,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Authenticate to AWS (OIDC, no long-lived keys)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
