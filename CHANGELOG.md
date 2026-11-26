@@ -12,6 +12,14 @@ All notable changes to SokoPrice, by assignment stage. The format follows [Keep 
 - **CI:** `workflow_call` trigger so CD runs the same checks.
 - `CHANGELOG.md`, operations manual and architecture diagram in the README, `docs/SUMMATIVE_GUIDE.md` (evidence checklist and demo-video plan).
 
+### Fixed (found during the first live deployment)
+- The first CD run stopped at the AWS login: GitHub now sends the repository in an immutable form (`owner@id/repo@id`), and the deploy job's `production` environment uses a different subject. The role in `terraform/modules/cicd` now trusts the name-based and immutable forms for `main` and for the `production` environment.
+- The bastion server showed as "to be replaced" on every plan because its Elastic IP makes AWS report a public address; `associate_public_ip_address` is now ignored for that instance (`terraform/modules/compute`).
+- `APP_LOG_GROUP` was set with a Windows path by Git Bash; documented the `MSYS_NO_PATHCONV=1` fix in the operations manual.
+
+### Delivered
+- Live application on an AWS load balancer address, and the video demo, both linked from the top of the README.
+
 ### Changed
 - The database moved from a container on the server to managed RDS; the server runs the app container only.
 - `SECURITY.md`: new controls and accepted risks for the load balancer, NAT, RDS and pipeline.
