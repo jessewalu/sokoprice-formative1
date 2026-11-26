@@ -6,12 +6,55 @@
 [![CI](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/ci.yml)
 [![Publish image](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml/badge.svg)](https://github.com/jessewalu/sokoprice-formative1/actions/workflows/publish.yml)
 
-> **Live application:** `http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com` &nbsp;·&nbsp; health check: `/health` &nbsp;·&nbsp; example: `/api/prices/maize`
-> *(Replace the placeholder with the real address from `terraform output app_url` once the environment is deployed; see [section 20](#20-operations-manual).)*
+> ## Live application and demo
 >
-> **Project history:** [CHANGELOG.md](CHANGELOG.md) (Formative 1, 2, 3 and the Summative).
+> | | |
+> |---|---|
+> | **Live app (AWS)** | [http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com) |
+> | Health check | [/health](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com/health) (`{"status":"ok"}`) |
+> | Crop prices | [/api/prices/maize](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com/api/prices/maize) |
+> | Best market to sell | [/api/best-market/beans](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com/api/best-market/beans) |
+> | Statistics (reads the database) | [/api/stats](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com/api/stats) |
+> | **Video demo (YouTube)** | [https://www.youtube.com/watch?v=hLlKliP6FPI](https://www.youtube.com/watch?v=hLlKliP6FPI) |
+> | Project history | [CHANGELOG.md](CHANGELOG.md) (Formative 1, 2, 3 and the Summative) |
+>
+> The app is an API and USSD service with no web page, so open the links above. The environment is created by Terraform and is only running while we keep it deployed (it is billed by the hour). If a link does not answer, see [section 20](#20-operations-manual) to rebuild it, or watch the video, which shows the whole pipeline working.
 
-**Contents:** [Problem](#1-problem-statement) · [Users](#2-target-users) · [Features](#3-core-features) · [Stack](#4-technology-stack) · [Run locally](#5-how-to-run-the-app) · [Docker](#6-containerisation-with-docker) · [Docker Compose](#7-docker-compose) · [CI pipeline](#8-continuous-integration-github-actions) · [Branch protection](#9-branch-protection-and-collaboration-evidence) · [Structure](#10-project-structure) · [Security](#11-security-practices-shift-left) · [Project management](#12-project-management) · [Contributing](#13-contributing) · [Team](#14-team) · [Architecture](#15-architecture) · [Terraform](#16-infrastructure-as-code-terraform) · [Ansible](#17-configuration-management-ansible) · [DevSecOps](#18-devsecops-security-scanning) · [CD pipeline](#19-continuous-deployment-cd) · [Operations manual](#20-operations-manual) · [License](#21-license)
+## At a glance: what we built
+
+SokoPrice was built in four stages. Each stage adds to the one before it, and everything is in this repository.
+
+| Stage | What was delivered | Where to look |
+|-------|--------------------|---------------|
+| **Formative 1** | The application: crop price service, REST API, 2-level USSD menu, tests, GitHub project board, branch protection | Sections 1 to 5, 12 |
+| **Formative 2** | Docker (multi-stage, non-root), Docker Compose with PostgreSQL, CI pipeline (lint, tests, build, smoke test), image publishing | Sections 6 to 9 |
+| **Formative 3** | Terraform (first AWS server), Ansible (Docker, firewall, SSH hardening), DevSecOps scans (pip-audit, Bandit, Trivy, Checkov), `SECURITY.md`, Dependabot | Sections 16 to 18, [`SECURITY.md`](SECURITY.md) |
+| **Summative** | Complete pipeline: private network, private server, bastion, managed RDS database, private ECR registry, load balancer, CloudWatch monitoring, and a CD workflow that deploys automatically on merge to `main` | Sections 15 to 21 |
+
+**Summative requirements, and where each is met**
+
+| Requirement | Where it is met |
+|-------------|-----------------|
+| Modular Terraform in `terraform/` | 8 modules in [`terraform/modules/`](terraform/modules) ([section 16](#16-infrastructure-as-code-terraform)) |
+| Private network (VPC) | `modules/network`: public and private subnets, NAT gateway |
+| VM in a **private** subnet | `modules/compute`: the application server has no public IP |
+| **Bastion host** in a public subnet | `modules/compute`: the only way to reach the private server by SSH |
+| **Managed database** | `modules/database`: Amazon RDS PostgreSQL, encrypted, TLS enforced |
+| All **security groups** | `modules/security`: load balancer, bastion, app and database, chained |
+| **Private container registry** | `modules/registry`: Amazon ECR |
+| Ansible installs Docker and Docker Compose | [`ansible/`](ansible/README.md), role `docker` ([section 17](#17-configuration-management-ansible)) |
+| **Container image scan** that fails on critical findings | Trivy in `ci.yml` and again in `cd.yml` before the push ([section 18](#18-devsecops-security-scanning)) |
+| **IaC scan** | Checkov on Terraform, Dockerfile, workflows, Ansible and secrets ([section 18](#18-devsecops-security-scanning)) |
+| `cd.yml` runs only on merge to `main` | [`.github/workflows/cd.yml`](.github/workflows/cd.yml) ([section 19](#19-continuous-deployment-cd)) |
+| CD runs all CI checks first | `ci` job reuses `ci.yml` |
+| Build, push to the private registry | `build-and-push` job (ECR) |
+| Authenticate to the cloud and run Ansible on the VM | `deploy` job: OIDC login, Ansible through the bastion |
+| **Live app on a public URL** | Load balancer address at the top of this file |
+| README as an operations manual with architecture diagram | [Sections 15 and 20](#15-architecture) |
+| `CHANGELOG.md` for Formative 1, 2 and Summative | [CHANGELOG.md](CHANGELOG.md) |
+| Video demo | [YouTube](https://www.youtube.com/watch?v=hLlKliP6FPI) |
+
+**Contents:** [At a glance](#at-a-glance-what-we-built) · [Problem](#1-problem-statement) · [Users](#2-target-users) · [Features](#3-core-features) · [Stack](#4-technology-stack) · [Run locally](#5-how-to-run-the-app) · [Docker](#6-containerisation-with-docker) · [Docker Compose](#7-docker-compose) · [CI pipeline](#8-continuous-integration-github-actions) · [Branch protection](#9-branch-protection-and-collaboration-evidence) · [Structure](#10-project-structure) · [Security](#11-security-practices-shift-left) · [Project management](#12-project-management) · [Contributing](#13-contributing) · [Team](#14-team) · [Architecture](#15-architecture) · [Terraform](#16-infrastructure-as-code-terraform) · [Ansible](#17-configuration-management-ansible) · [DevSecOps](#18-devsecops-security-scanning) · [CD pipeline](#19-continuous-deployment-cd) · [Operations manual](#20-operations-manual) · [Evidence and demo](#21-evidence-and-demo-video) · [Limitations and future work](#22-known-limitations-and-future-work) · [License](#23-license)
 
 ---
 
@@ -38,6 +81,7 @@ Smallholder farmers in Rwanda and across East Africa often sell their harvest wi
 4. **USSD menu (2 levels)**: feature-phone friendly navigation (Africa's Talking compatible).
 5. **REST API**: JSON endpoints for crops, prices, best markets and request statistics, plus a `/health` check used by Docker and CI.
 6. **Optional PostgreSQL request log**: every USSD menu path is stored (no phone numbers, no personal data) so the team can see which crops farmers ask about most. The app works without the database.
+7. **Production deployment on AWS**: the same app runs behind a load balancer on a private server with a managed database, deployed automatically by the CD pipeline (sections 15 to 20).
 
 *Planned (backlog):* prices stored in PostgreSQL, price submission by market agents, price-change SMS alerts, Kinyarwanda language support. *(Terraform cloud deployment is delivered: see sections 15 to 20.)*
 
@@ -52,8 +96,11 @@ Smallholder farmers in Rwanda and across East Africa often sell their harvest wi
 | Testing | pytest + pytest-cov (80% coverage gate) |
 | Linting | Ruff |
 | Containerisation | Docker (multi-stage, non-root) and Docker Compose |
-| CI/CD | GitHub Actions (lint, test, Docker build and smoke test; image publish to GHCR) |
-| Cloud / IaC | Terraform (AWS: VPC, EC2, RDS, ECR, ALB, CloudWatch), Ansible, GitHub Actions CI/CD |
+| CI/CD | GitHub Actions: CI (lint, test, Docker build and smoke test, security scans) and CD (build, scan, push to ECR, deploy with Ansible) |
+| Cloud / IaC | Terraform on AWS (`eu-north-1`): VPC, EC2 (`t3.micro`), RDS PostgreSQL 16 (`db.t3.micro`), ECR, Application Load Balancer, NAT gateway, Secrets Manager, KMS, IAM OIDC |
+| Configuration management | Ansible (roles `common`, `docker`, `security`, `app`) |
+| Security scanning | pip-audit, Bandit, Trivy, Checkov, ansible-lint, Dependabot |
+| Observability | CloudWatch Logs (container logs), metric alarms, dashboard, SNS alerts, VPC flow logs |
 | USSD gateway (planned) | Africa's Talking |
 
 ---
@@ -268,7 +315,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - `push` to **any branch except `main`**
 - `pull_request` **targeting `main`**
 
-Superseded runs on the same ref are cancelled (`concurrency`), and the workflow has read-only `contents` permission (least privilege).
+The workflow can also be called by another workflow (`workflow_call`): [`cd.yml`](.github/workflows/cd.yml) reuses it so the same checks run again before a deployment. Superseded runs on the same ref are cancelled (`concurrency`), and the workflow has read-only `contents` permission (least privilege).
 
 **Jobs**
 
@@ -279,7 +326,7 @@ Superseded runs on the same ref are cancelled (`concurrency`), and the workflow 
  (py3.11, py3.12)
 
  dependency-scan · sast-scan · container-scan · iac-scan · iac-validate
- (security and infrastructure checks, run in parallel; see section 17)
+ (security and infrastructure checks, run in parallel; see section 18)
 ```
 
 | Job | What it does | Fails when |
@@ -336,6 +383,8 @@ Links to real runs and pull requests (fill in the URLs from the Actions and Pull
 | Failed run (lint or test) | ≥ 1 failed run | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41034821146 |
 | Fix that turned it green | failed run then fixed | https://github.com/jessewalu/sokoprice-formative1/actions/runs/41121356911 |
 | Pull request with CI checks and review | ≥ 1 PR with review | https://github.com/jessewalu/sokoprice-formative1/pull/16 |
+| Summative pull request (`summative` into `main`) | Summative merge | https://github.com/jessewalu/sokoprice-formative1/pull/50 |
+| Summative CD run (build, scan, push to ECR, deploy) | Continuous deployment | https://github.com/jessewalu/sokoprice-formative1/actions/runs/44946298078 |
 | Branch protection screenshot | Required checks enabled | `docs/screenshots/branch-protection.png` |
 
 ### Team collaboration
@@ -363,15 +412,34 @@ sokoprice-formative1/
 │   ├── test_db.py           # Request-log tests (Postgres test runs in CI)
 │   ├── test_prices.py       # Price logic unit tests
 │   └── test_ussd.py         # USSD menu unit tests
-├── docs/PROJECT_BOARD.md    # GitHub Projects backlog, user stories, status
+├── docs/
+│   ├── PROJECT_BOARD.md     # GitHub Projects backlog, user stories, status
+│   ├── F2_EVIDENCE_GUIDE.md, F3_EVIDENCE_GUIDE.md, SUMMATIVE_GUIDE.md   # Evidence and submission guides
+│   └── screenshots/         # Evidence screenshots
 ├── .github/
 │   ├── workflows/ci.yml       # CI: lint, test (matrix), Docker build, security scans, IaC checks
 │   ├── dependabot.yml         # Weekly dependency update pull requests
 │   ├── workflows/publish.yml  # Push image to GHCR after merge to main
 │   ├── workflows/cd.yml       # Continuous deployment to AWS on merge to main (section 19)
 │   └── CODEOWNERS             # Required reviewers
-├── terraform/               # Infrastructure as Code: 8 modules (section 16)
+├── terraform/               # Infrastructure as Code (section 16)
+│   ├── main.tf, variables.tf, outputs.tf, versions.tf
+│   ├── terraform.tfvars.example, backend.tf.example
+│   ├── environments/        # dev and prod settings examples
+│   └── modules/
+│       ├── network/         # VPC, public/private subnets, NAT gateway, flow logs
+│       ├── security/        # Security groups: load balancer, bastion, app, database
+│       ├── compute/         # Bastion host (public) and app server (private)
+│       ├── database/        # RDS PostgreSQL, KMS key, Secrets Manager
+│       ├── registry/        # Private ECR repository
+│       ├── loadbalancer/    # Application Load Balancer and target group
+│       ├── cicd/            # GitHub OIDC provider and deploy role
+│       └── monitoring/      # CloudWatch logs, alarms, dashboard, SNS
 ├── ansible/                 # Server configuration and deployment (section 17)
+│   ├── site.yml             # Playbook: bastion play and app server play
+│   ├── inventory/           # production.yml (pipeline), hosts.ini, aws_ec2.yml
+│   ├── group_vars/          # Settings, Vault example, ProxyCommand through the bastion
+│   └── roles/               # common, docker, security, app
 ├── SECURITY.md              # Scan results, remediation, accepted risks (section 18)
 ├── CHANGELOG.md             # History: Formative 1, 2, 3 and Summative
 ├── requirements-security.txt # Pinned security scanners
@@ -398,11 +466,14 @@ sokoprice-formative1/
 - The USSD log stores only the menu path, **never phone numbers**.
 - CI uses least-privilege `permissions`, and image publishing uses the short-lived `GITHUB_TOKEN`.
 - `main` is protected by branch protection rules (section 9).
-- Five automated security and infrastructure scans run on every pull request (section 17); findings and accepted risks are documented in [`SECURITY.md`](SECURITY.md).
+- Five automated security and infrastructure scans run on every pull request (section 18); findings and accepted risks are documented in [`SECURITY.md`](SECURITY.md).
+- **In the cloud (Summative):** the application server and the database are in **private subnets** with no public address; the only public components are the load balancer and the bastion host. Security groups are chained (internet to load balancer to app to database), disks, database, registry and logs are encrypted, the database enforces TLS, the database password is generated by Terraform and kept in AWS Secrets Manager, and instances require IMDSv2.
+- **No stored cloud keys:** GitHub Actions signs in to AWS with short-lived OpenID Connect (OIDC) credentials. The deploy role can only be assumed by this repository and can only touch one registry, one secret and one security group.
+- Images are scanned with Trivy before they are pushed, and registry tags are immutable (the tag is the commit SHA).
 
 ## 12. Project Management
 
-Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Done) with user stories, acceptance criteria, labels, assignees and milestones. The full backlog, current status and acceptance criteria are documented in [`docs/PROJECT_BOARD.md`](docs/PROJECT_BOARD.md).
+Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Done) with user stories, acceptance criteria, labels, assignees and milestones. The full backlog, current status and acceptance criteria are documented in [`docs/PROJECT_BOARD.md`](docs/PROJECT_BOARD.md) (36 items across Formatives 1 to 3 and the Summative). Per-member tasks, deadlines and meeting notes are in the team contribution sheet (section 14).
 
 ## 13. Contributing
 
@@ -414,11 +485,11 @@ Work is tracked on our GitHub Projects Kanban board (Backlog / In Progress / Don
 
 ## 14. Team
 
-| Name | GitHub | Role |
-|------|--------|------|
-| Jesse Walusansa | [@jessewalu](https://github.com/jessewalu) | Backend & DevOps (CI/CD) |
-| Karabo Ojiambo | [@Karabo-jpg](https://github.com/Karabo-jpg) | Testing, Docker & Documentation |
-| K. Koita | [@Kkadi20](https://github.com/Kkadi20) | Repository security & Project management |
+| Name | GitHub | Role | Summative contribution |
+|------|--------|------|------------------------|
+| Jesse Walusansa | [@jessewalu](https://github.com/jessewalu) | Backend & DevOps (CI/CD), team lead | Terraform infrastructure (all eight modules), AWS deployment, GitHub OIDC and pipeline setup, live deployment and troubleshooting |
+| Karabo Ojiambo | [@Karabo-jpg](https://github.com/Karabo-jpg) | Testing, Docker & Documentation | Ansible playbook and roles (Docker, firewall, SSH hardening, deployment, rollback), inventories, CI update, operations documentation |
+| K. Koita | [@Kkadi20](https://github.com/Kkadi20) | Repository security & Project management | CD workflow (`cd.yml`), security review and `SECURITY.md`, GitHub environment and branch-protection checks, project board |
 
 Team contribution sheet: https://docs.google.com/spreadsheets/d/1k8UOI845SVSR8oId_86h8xpJYibwzxaeQ3t5jsGJFbw/edit?usp=sharing
 
@@ -467,6 +538,19 @@ flowchart LR
 | Configuration | Docker, Compose, firewall, SSH hardening, deploy | `ansible/` |
 | Automation | CI (`ci.yml`) and CD (`cd.yml`) | `.github/workflows/` |
 
+**How a request travels:** internet → load balancer (public subnets, port 80) → application server (private subnet) → RDS database (private subnet, TLS). **How an administrator or the pipeline gets in:** only through the bastion host with an SSH key; the server and database accept no connection from the internet.
+
+| Item | Value (dev environment) |
+|------|-------------------------|
+| Region | `eu-north-1` (Stockholm) |
+| Network | VPC `10.20.0.0/16`, two public subnets, two private subnets, one NAT gateway |
+| Servers | Ubuntu EC2 `t3.micro`: bastion (public subnet, Elastic IP) and app server (private subnet) |
+| Database | RDS PostgreSQL 16, `db.t3.micro`, 20 GB, encrypted, 1-day backups |
+| Registry | ECR repository `sokoprice/app` (immutable tags, scan on push) |
+| Entry point | Application Load Balancer, HTTP on port 80, health check on `/health` |
+| Pipeline identity | IAM role `sokoprice-dev-github-deploy` (OIDC) |
+| Monitoring | CloudWatch log group `/sokoprice/dev/app`, dashboard `sokoprice-dev-overview`, six alarms |
+
 ## 16. Infrastructure as Code (Terraform)
 
 The infrastructure is defined in [`terraform/`](terraform/README.md) as **eight modules** (`network`, `security`, `compute`, `database`, `registry`, `loadbalancer`, `cicd`, `monitoring`). It creates a private network, an application server in a **private subnet**, a **bastion host** in a public subnet, a managed **RDS** database, all security groups and a private **ECR** registry, and exposes the app through a load balancer. Inputs are validated variables (no secrets, no hard-coded region), providers are pinned and every resource is tagged.
@@ -479,6 +563,8 @@ terraform plan -out=tfplan
 terraform apply tfplan
 terraform output app_url
 ```
+
+Useful outputs after `terraform apply`: `app_url` (the live address), `ecr_repository_url`, `bastion_public_ip`, `ssh_bastion_command`, `ssh_app_command`, `db_endpoint`, `db_password_command`, `dashboard_name`, `github_cli_commands` (sets every GitHub variable for the pipeline) and `ansible_inventory`. Two environment examples are provided: [`dev.tfvars.example`](terraform/environments/dev.tfvars.example) (cheap, easy to destroy) and [`prod.tfvars.example`](terraform/environments/prod.tfvars.example) (Multi-AZ database, deletion protection, longer backups).
 
 Full instructions, variables, security design and costs: [`terraform/README.md`](terraform/README.md).
 
@@ -520,13 +606,17 @@ Security checks run in GitHub Actions on **every pull request** and again before
 
 Safeguards: least-privilege permissions, one deployment at a time (`concurrency`), the AWS role can only be assumed from `main` of this repository, and the temporary SSH rule and key file are removed even when the run fails (`if: always()`).
 
+**Result:** the first CD run after the merge is the evidence for this stage: [CD run](https://github.com/jessewalu/sokoprice-formative1/actions/runs/44946298078). It stopped at the AWS login because GitHub now sends the repository in an immutable form (`owner@id/repo@id`) that the first version of the role did not trust. We fixed the role's trust policy (see [CHANGELOG.md](CHANGELOG.md) and the troubleshooting table below), re-ran the workflow, and all three jobs passed.
+
 The older [`publish.yml`](.github/workflows/publish.yml) (public GitHub Container Registry image) is kept as the Formative 2 deliverable; the production deployment uses the private ECR image from `cd.yml`.
 
 ## 20. Operations manual
 
 ### 20.1 First-time setup (once)
 
-1. Create the infrastructure: `terraform apply` (section 16). Takes 10 to 15 minutes.
+**You need:** Terraform, the AWS CLI configured with a user that can create the resources (`aws configure`), the GitHub CLI (`gh auth login`, as a repository admin), Git Bash or Linux, and an SSH key pair (`ssh-keygen -t ed25519 -f ~/.ssh/sokoprice -N ""`). On Windows use **Git Bash** for these commands (Ansible, if you run it by hand, needs WSL). If a path starting with `/` is mangled by Git Bash, put `MSYS_NO_PATHCONV=1` in front of the command.
+
+1. Create the infrastructure: `terraform apply` (section 16). Takes 10 to 15 minutes. Use `terraform plan -out=tfplan` and apply that exact file; if you change any file, make a new plan.
 2. Connect GitHub to AWS (the only secret is the SSH key):
 
 ```bash
@@ -534,7 +624,7 @@ terraform -chdir=terraform output -raw github_cli_commands | bash
 gh secret set DEPLOY_SSH_PRIVATE_KEY < ~/.ssh/sokoprice
 ```
 
-3. In GitHub: **Settings → Environments → New environment** named `production` (optionally require a reviewer), and add the new jobs `lint`, `test`, `container-scan (Trivy)`, `iac-scan` and `iac-validate` to the required checks of the `main` branch protection rule.
+3. In GitHub: **Settings → Environments → New environment** named `production` (optionally require a reviewer), and add all nine CI checks as required status checks on the `main` branch protection rule: `lint`, `test (py3.11)`, `test (py3.12)`, `docker-build`, `dependency-scan (pip-audit)`, `sast-scan (Bandit)`, `container-scan (Trivy)`, `iac-scan (Checkov)` and `iac-validate (Terraform + Ansible)`. Do not add the CD jobs: they only run after a merge.
 4. Merge a pull request to `main`. The CD workflow builds, pushes and deploys. Open `terraform output app_url`.
 
 ### 20.2 Deploy a change
@@ -552,7 +642,7 @@ Open a pull request, wait for green checks, get a review, merge. That is all: CD
 |------|-----|
 | Live check | `curl "$(terraform -chdir=terraform output -raw app_url)/health"` |
 | Logs | CloudWatch Logs, group `terraform output app_log_group_name`; or SSH to the server (`terraform output ssh_app_command`) and run `cd /opt/sokoprice && docker compose logs --tail 100` |
-| Metrics and alarms | CloudWatch dashboard `terraform output dashboard_name`; alarms for server CPU, unhealthy targets, 5xx errors, database CPU and storage notify the SNS topic (set `alert_email` to receive them) |
+| Metrics and alarms | CloudWatch dashboard `terraform output dashboard_name`; six alarms (server CPU, server status check, unhealthy targets, 5xx errors, database CPU, database storage) notify the SNS topic (set `alert_email` to receive them) |
 | Database password | `terraform output -raw db_password_command` shows the command that reads it from Secrets Manager |
 
 ### 20.5 Troubleshooting
@@ -563,6 +653,11 @@ Open a pull request, wait for green checks, get a review, merge. That is all: CD
 | CD fails opening the bastion | `BASTION_SG_ID` wrong, or the role lacks permission: re-run `terraform apply` |
 | Ansible cannot connect | Secret `DEPLOY_SSH_PRIVATE_KEY` is not the private half of the key given to Terraform; `BASTION_HOST` changed after a rebuild (re-run `github_cli_commands`) |
 | Load balancer returns 502/503 | No healthy container yet: check the deploy job, then `docker compose logs` on the server |
+| CD fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The role's trust policy does not match what GitHub sends. Check the token subject with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`; the role trusts both `repo:<owner>/<repo>` and the immutable `owner@id/repo@id` forms, for `main` and for the `production` environment. Re-apply Terraform and re-run |
+| `terraform apply tfplan` says the plan is stale or the lock file is inconsistent | The plan was made from older code or state. Delete `tfplan`, run `terraform init -upgrade`, make a new plan |
+| `terraform apply` fails because old resources already exist | An earlier stack (for example Formative 3) is still deployed: run `terraform destroy` with that code first |
+| `gh: command not found` in Git Bash after installing | Close and reopen Git Bash, or add the install folder (`C:\Program Files\GitHub CLI`) to the PATH in `~/.bashrc` |
+| A GitHub variable such as `APP_LOG_GROUP` shows `C:/Program Files/Git/...` | Git Bash rewrote a leading `/`. Set it again with `MSYS_NO_PATHCONV=1 gh variable set ...` |
 | Trivy fails the build | A fixable HIGH/CRITICAL vulnerability: update the base image or package (Dependabot usually opens that PR) |
 | App starts but `/api/stats` fails | Database unreachable: check `DB_HOST`, the database security group, and that the password in Secrets Manager matches |
 
@@ -572,83 +667,38 @@ Open a pull request, wait for green checks, get a review, merge. That is all: CD
 terraform -chdir=terraform destroy
 ```
 
-Then delete the IAM access key used for Terraform. The load balancer, NAT gateway and database are billed by the hour.
+Then delete the IAM access key used for Terraform. The load balancer, NAT gateway and database are billed by the hour (roughly 3 to 4 US dollars per day together; check the AWS pricing pages). In the dev settings a destroy leaves nothing behind; the production settings protect the registry and database.
 
-## 21. License
-known vulnerability |
-| Static code analysis | Bandit | Medium or higher |
-| **Container image scan** | **Trivy** | **Fixable HIGH or CRITICAL fails the build** (in CI and again in CD before the push) |
-| **Infrastructure-as-Code scan** | **Checkov** (Terraform, Dockerfile, workflows, Ansible, secrets) | **Any failed check fails the build** |
-| IaC quality | `terraform fmt/validate`, `ansible-lint` (production profile) | Any error |
+### 20.7 Secrets and what must never be committed
 
-[`SECURITY.md`](SECURITY.md) documents the findings, how each was fixed, the accepted risks with the reason, and the security controls. Dependabot opens weekly update pull requests. Run the scans locally with `pip install -r requirements-security.txt`.
+Never commit `terraform.tfvars`, `tfplan`, `.terraform/`, `terraform.tfstate`, `ansible/group_vars/all/vault.yml`, SSH private keys or AWS access keys (all are in `.gitignore`). The database password is generated by Terraform and kept in AWS Secrets Manager; the pipeline reads it at run time and masks it in the logs. The only GitHub secret is `DEPLOY_SSH_PRIVATE_KEY`; everything else is a non-secret repository variable.
 
-## 19. Continuous Deployment (CD)
+## 21. Evidence and demo video
 
-[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **only when code is merged to `main`**:
+**Video demo:** [https://www.youtube.com/watch?v=hLlKliP6FPI](https://www.youtube.com/watch?v=hLlKliP6FPI). It walks through the three stages (application, containers and CI, infrastructure and security) and the finished Summative pipeline.
 
-| Stage | What happens | Stops the pipeline if |
-|-------|--------------|-----------------------|
-| 1. `ci` | Runs every CI job again: lint, tests, dependency, SAST, container, IaC scans, Terraform and Ansible validation | any check fails |
-| 2. `build-and-push` | Authenticates to AWS with **OIDC** (no stored keys), builds the image, **scans it with Trivy**, pushes it to the private **ECR** registry tagged with the commit SHA | a fixable HIGH/CRITICAL vulnerability is found |
-| 3. `deploy` | Fetches a short-lived registry token and the database password (masked), opens the bastion for the runner's own IP for the duration of the run, runs **Ansible through the bastion**: log in to ECR, pull the new image, `docker compose up -d`, check `/health` on the live URL; then closes the bastion again | the new version is not healthy (it is rolled back and the run fails) |
+| Evidence | Where |
+|----------|-------|
+| Live application | [Load balancer address](http://sokoprice-dev-alb-1817405499.eu-north-1.elb.amazonaws.com/health) |
+| Summative pull request | https://github.com/jessewalu/sokoprice-formative1/pull/50 |
+| CD run (CI, build and scan, push to ECR, deploy) | https://github.com/jessewalu/sokoprice-formative1/actions/runs/44946298078 |
+| CI runs and pull requests with reviews (Formatives 1 and 2) | Section 9 |
+| Scan findings, fixes and accepted risks | [`SECURITY.md`](SECURITY.md) |
+| What changed in each stage | [`CHANGELOG.md`](CHANGELOG.md) |
+| Evidence and submission guides | [`docs/F2_EVIDENCE_GUIDE.md`](docs/F2_EVIDENCE_GUIDE.md), [`docs/F3_EVIDENCE_GUIDE.md`](docs/F3_EVIDENCE_GUIDE.md), [`docs/SUMMATIVE_GUIDE.md`](docs/SUMMATIVE_GUIDE.md) |
+| Task allocation and meeting log | Team contribution sheet (section 14) |
 
-Safeguards: least-privilege permissions, one deployment at a time (`concurrency`), the AWS role can only be assumed from `main` of this repository, and the temporary SSH rule and key file are removed even when the run fails (`if: always()`).
+## 22. Known limitations and future work
 
-The older [`publish.yml`](.github/workflows/publish.yml) (public GitHub Container Registry image) is kept as the Formative 2 deliverable; the production deployment uses the private ECR image from `cd.yml`.
+These are deliberate, documented trade-offs for a course project; each accepted risk is explained in [`SECURITY.md`](SECURITY.md).
 
-## 20. Operations manual
+- The public address uses **HTTP**, not HTTPS, because we have no domain name or certificate. The HTTPS listener and redirect are already in the Terraform code and switch on when `certificate_arn` is set.
+- No web application firewall and no load balancer access logs.
+- One NAT gateway and one application server, and the dev database is single-zone (the production settings turn on Multi-AZ and deletion protection).
+- The database password is generated once and not rotated automatically.
+- The app connects to the database with encryption (`sslmode=require`) but does not verify the server certificate.
+- The price data is a JSON file; planned: prices in PostgreSQL, price submission by market agents, SMS alerts, Kinyarwanda, and a real USSD gateway (Africa's Talking).
 
-### 20.1 First-time setup (once)
-
-1. Create the infrastructure: `terraform apply` (section 16). Takes 10 to 15 minutes.
-2. Connect GitHub to AWS (the only secret is the SSH key):
-
-```bash
-terraform -chdir=terraform output -raw github_cli_commands | bash
-gh secret set DEPLOY_SSH_PRIVATE_KEY < ~/.ssh/sokoprice
-```
-
-3. In GitHub: **Settings → Environments → New environment** named `production` (optionally require a reviewer), and add the new jobs `lint`, `test`, `container-scan (Trivy)`, `iac-scan` and `iac-validate` to the required checks of the `main` branch protection rule.
-4. Merge a pull request to `main`. The CD workflow builds, pushes and deploys. Open `terraform output app_url`.
-
-### 20.2 Deploy a change
-
-Open a pull request, wait for green checks, get a review, merge. That is all: CD does the rest. The image tag is the commit SHA, so every running version can be traced to a commit.
-
-### 20.3 Roll back
-
-- **Automatic:** if a new version does not become healthy, the playbook restarts the previous image and the run fails.
-- **Manual:** find the last good commit in the **Actions** tab and re-run its `CD` workflow (or revert the commit and merge the revert).
-
-### 20.4 Look at the application
-
-| Need | How |
-|------|-----|
-| Live check | `curl "$(terraform -chdir=terraform output -raw app_url)/health"` |
-| Logs | CloudWatch Logs, group `terraform output app_log_group_name`; or SSH to the server (`terraform output ssh_app_command`) and run `cd /opt/sokoprice && docker compose logs --tail 100` |
-| Metrics and alarms | CloudWatch dashboard `terraform output dashboard_name`; alarms for server CPU, unhealthy targets, 5xx errors, database CPU and storage notify the SNS topic (set `alert_email` to receive them) |
-| Database password | `terraform output -raw db_password_command` shows the command that reads it from Secrets Manager |
-
-### 20.5 Troubleshooting
-
-| Symptom | Likely cause and fix |
-|---------|----------------------|
-| CD fails at `Authenticate to AWS` | Repository variables missing or wrong (`AWS_ROLE_ARN`), or the run is not on `main` |
-| CD fails opening the bastion | `BASTION_SG_ID` wrong, or the role lacks permission: re-run `terraform apply` |
-| Ansible cannot connect | Secret `DEPLOY_SSH_PRIVATE_KEY` is not the private half of the key given to Terraform; `BASTION_HOST` changed after a rebuild (re-run `github_cli_commands`) |
-| Load balancer returns 502/503 | No healthy container yet: check the deploy job, then `docker compose logs` on the server |
-| Trivy fails the build | A fixable HIGH/CRITICAL vulnerability: update the base image or package (Dependabot usually opens that PR) |
-| App starts but `/api/stats` fails | Database unreachable: check `DB_HOST`, the database security group, and that the password in Secrets Manager matches |
-
-### 20.6 Tear down (important: it costs money while running)
-
-```bash
-terraform -chdir=terraform destroy
-```
-
-Then delete the IAM access key used for Terraform. The load balancer, NAT gateway and database are billed by the hour.
-
-## 21. License
+## 23. License
 
 Released under the [MIT License](LICENSE).
