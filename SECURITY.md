@@ -46,6 +46,7 @@ checkov -d . --framework terraform dockerfile github_actions ansible secrets --c
 | 5 | Checkov | Dockerfile, workflows, Ansible, secrets | None | repository | 0 failed checks | Clean |
 | 6 | Trivy | Container image scan | See note | Docker image | The Dockerfile now applies the latest operating-system security patches (`apt-get upgrade`) and removes `pip`, `setuptools` and `wheel` from the final image to shrink the attack surface | See note |
 
+> **Note on finding 6.** Trivy needs to download its vulnerability database and pull the base image, which was not possible from the environment where this document was prepared. Trivy therefore runs in CI only. The first CI run of `container-scan` is the evidence. Record its result here after the first run: *date, number of HIGH/CRITICAL findings, and what was done about each.* If a finding is fixable, bump the base image tag in the `Dockerfile` or the package in `requirements.txt` (Dependabot will usually open that pull request). If it is not fixable and the team accepts it, add it to the table below with a reason.
 
 ## Accepted risks
 
@@ -70,6 +71,7 @@ Every item below is also a comment next to the code (`#checkov:skip=ID:reason`),
 | A15 | Database connection uses `sslmode=require` (encrypted, server certificate not verified) | `ansible/roles/app` | Verifying needs the RDS CA bundle on the server | RDS refuses unencrypted connections (`rds.force_ssl=1`) and is reachable only from the app security group |
 | A16 | Single NAT gateway and single app server | `terraform/` | Cost of a course project | Documented limit; Multi-AZ database in production settings |
 | A17 | Bastion SSH is open to the runner's IP during a deployment | `.github/workflows/cd.yml` | GitHub-hosted runners have changing addresses | Rule is for the runner's own /32 only, port 22 only, and is revoked at the end of the run even when it fails (`if: always()`) |
+| A18 | OIDC trust policy uses `StringLike` with `*` for the numeric repository and owner IDs | `terraform/modules/cicd` | GitHub's immutable subject format includes IDs we do not control in code | The owner name, repository name, branch (`main`) and environment (`production`) stay fixed, so only this repository can assume the role |
 
 ## Security controls in the project
 

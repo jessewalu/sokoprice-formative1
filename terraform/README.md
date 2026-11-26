@@ -173,6 +173,8 @@ The `iac-validate` job runs `terraform fmt -check`, `terraform init -backend=fal
 | `RDS ... backup retention period` error | Some AWS free-plan accounts limit backups to 1 day: keep `db_backup_retention_days = 1` |
 | `OpenIDConnect provider already exists` | Another stack in the account owns it: set `create_github_oidc_provider = false` |
 | `EntityAlreadyExists` for roles or groups from an earlier run | An earlier stack is still deployed: run `terraform destroy` there first |
+| CD fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The role must trust what GitHub sends. It trusts `repo:<owner>/<repo>` and the immutable `repo:<owner>@id/<repo>@id` forms, for `main` and the `production` environment (`modules/cicd`). Check with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`, then re-apply |
+| Plan wants to replace the bastion every time | Fixed: `associate_public_ip_address` is ignored for the bastion because of its Elastic IP |
 | Target group shows **unhealthy** after apply | Expected until the first deployment: no container runs yet. Merge to `main` (or run Ansible by hand) |
 | `ssh` to the private server times out | Use `terraform output ssh_app_command` (it jumps through the bastion); check `admin_cidrs` is your **current** IP |
 | `Error acquiring the state lock` | A previous run was interrupted: wait, or `terraform force-unlock <ID>` |
